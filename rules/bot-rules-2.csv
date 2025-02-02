@@ -1,75 +1,26 @@
-##
-## Rules for SimpleBrain
-#
-# These rules have been generated using ChatGPT:
-# https://chatgpt.com/share/678f0123-7724-8002-b75e-60a51ba6dac9
-#
 message,response
-*hello*, Hi there! I have knowledge about requirement analysis and can assist with understanding its processes.
-*hello*, Hello! Requirement analysis ensures that we meet stakeholder expectations effectively.
-*hi*, Hello! Requirement analysis is key to understanding user needs and creating effective solutions.
-*hi*, Hi! Let’s explore the importance of requirement analysis in software engineering.
-*hey*, Hey there! I can guide you through requirement analysis concepts.
-*good morning*, Good morning! Ready to discuss requirement analysis and its significance?
+*hello*,Hi there! I can help you analyze S&P 500 stocks. Just enter a stock ticker symbol.
+*hi*,Hello! Please provide a stock ticker for an S&P 500 company to proceed.
+*hey*,Hey! Type an S&P 500 stock ticker to get started.
+*good morning*,Good morning! Enter an S&P 500 stock ticker for analysis.
+*good afternoon*,Good afternoon! Which S&P 500 stock would you like to analyze?
+*good evening*,Good evening! Enter an S&P 500 stock ticker, and let’s review its financials.
 
-*what is the purpose of*, Understanding the purpose helps in defining clear requirements.
-*how can we determine*, By analyzing user needs and stakeholder input.
-*why do we need to document*, Documentation ensures clarity and traceability.
-*can we define requirements for*, Yes, we can use stakeholder input and project goals.
-*what tools are used for*, Tools like JIRA and Trello are commonly used.
-*who is responsible for*, Typically, business analysts and project managers.
-*when do we gather*, During the early stages of the software development lifecycle.
-*where do we store*, In a centralized requirements management system.
-*how do we validate*, By reviewing and confirming with stakeholders.
-*why is traceability important in*, It ensures that all requirements are fulfilled.
-*what are the steps in*, Steps include elicitation, analysis, documentation, and validation.
-*why do stakeholders influence*, They are the primary source of requirements.
-*how do we prioritize*, By evaluating impact, urgency, and feasibility.
-*why should requirements be clear for*, To prevent miscommunication and rework.
-*what techniques are useful for*, Techniques like interviews, surveys, and workshops.
-*why is elicitation crucial for*, It ensures all necessary information is gathered.
-*how do we avoid ambiguity in*, By using precise and consistent language.
-*what role do prototypes play in*, They help visualize and refine requirements.
-*why should we involve users in*, To ensure the solution meets their needs.
-*how does risk analysis relate to*, It identifies potential challenges and mitigation strategies.
-*why are functional requirements key to*, They define the core operations of the system.
-*how do non-functional requirements affect*, They influence system performance and usability.
-*what is the role of diagrams in*, Diagrams help clarify and communicate requirements.
-*how does version control help in*, It tracks changes and maintains consistency.
-*why are user stories part of*, They provide a clear, user-focused perspective.
-*how do we ensure alignment with*, By conducting regular reviews and updates.
-*why do use cases matter in*, They outline system interactions and workflows.
-*how can we improve collaboration for*, By fostering communication and using collaboration tools.
-*why do iterative processes support*, They allow for continuous refinement and feedback.
-*how does feedback enhance*, Feedback ensures that requirements align with expectations.
+*what stocks do you cover*,We analyze only companies in the S&P 500. Please provide a valid stock ticker.
+*can I analyze any stock*,No, this bot is limited to S&P 500 stocks. Please enter a ticker from the index.
+*how do I use this bot*,Simply type an S&P 500 ticker (e.g., AAPL, MSFT) to receive a financial analysis.
+*where do you get data*,We retrieve financial data from SEC 10-Q filings of S&P 500 companies.
 
-*what is the purpose of*, Understanding the purpose helps in defining clear requirements.
-*how can we determine*, By analyzing user needs and stakeholder input.
-*why do we need to document*, Documentation ensures clarity and traceability.
-*can we define requirements for*, Yes, we can use stakeholder input and project goals.
-*what tools are used for*, Tools like JIRA and Trello are commonly used.
-*who is responsible for*, Typically, business analysts and project managers.
-*when do we gather*, During the early stages of the software development lifecycle.
-*where do we store*, In a centralized requirements management system.
-*how do we validate*, By reviewing and confirming with stakeholders.
-*why is traceability important in*, It ensures that all requirements are fulfilled.
-*what are the steps in*, Steps include elicitation, analysis, documentation, and validation.
-*why do stakeholders influence*, They are the primary source of requirements.
-*how do we prioritize*, By evaluating impact, urgency, and feasibility.
-*why should requirements be clear for*, To prevent miscommunication and rework.
-*what techniques are useful for*, Techniques like interviews, surveys, and workshops.
-*why is elicitation crucial for*, It ensures all necessary information is gathered.
-*how do we avoid ambiguity in*, By using precise and consistent language.
-*what role do prototypes play in*, They help visualize and refine requirements.
-*why should we involve users in*, To ensure the solution meets their needs.
-*how does risk analysis relate to*, It identifies potential challenges and mitigation strategies.
-*why are functional requirements key to*, They define the core operations of the system.
-*how do non-functional requirements affect*, They influence system performance and usability.
-*what is the role of diagrams in*, Diagrams help clarify and communicate requirements.
-*how does version control help in*, It tracks changes and maintains consistency.
-*why are user stories part of*, They provide a clear, user-focused perspective.
-*how do we ensure alignment with*, By conducting regular reviews and updates.
-*why do use cases matter in*, They outline system interactions and workflows.
-*how can we improve collaboration for*, By fostering communication and using collaboration tools.
-*why do iterative processes support*, They allow for continuous refinement and feedback.
-*how does feedback enhance*, Feedback ensures that requirements align with expectations.
+*is {ticker} in S&P 500*,Let me check... If {ticker} is in the S&P 500, I'll proceed with analysis.
+*what is {ticker}*,{ticker} is a company in the S&P 500. Would you like an analysis of its financials?
+*analyze {ticker}*,Analyzing {ticker}... Extracting key financial indicators from its latest 10-Q filing.
+*should I buy {ticker}*,Let’s evaluate {ticker}. I will check Free Cash Flow, Revenue Growth, and Operating Margin.
+*is {ticker} a good stock*,I can analyze {ticker} based on fundamentals. Let’s review its financial performance.
+
+*what indicators do you use*,We use Free Cash Flow, Revenue Growth, and Operating Margin trends.
+*how does the buy/hold/sell work*,If 2+ indicators are bullish, it's a BUY. If 2+ are bearish, it's a SELL. Mixed signals mean HOLD.
+*can I get price data*,No, we do not use stock prices—only fundamentals from SEC 10-Q filings.
+*can I analyze crypto*,No, this bot only analyzes stocks in the S&P 500.
+*can I analyze ETFs*,No, we do not analyze ETFs—only individual companies in the S&P 500.
+
+*DEFAULT*,A stock ticker, dear user, or else all is but sound and fury, signifying nothing.
