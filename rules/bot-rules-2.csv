@@ -1,26 +1,26 @@
 message,response
-*hello*,Hi there! I can help you analyze S&P 500 stocks. Just enter a stock ticker symbol.
-*hi*,Hello! Please provide a stock ticker for an S&P 500 company to proceed.
-*hey*,Hey! Type an S&P 500 stock ticker to get started.
-*good morning*,Good morning! Enter an S&P 500 stock ticker for analysis.
-*good afternoon*,Good afternoon! Which S&P 500 stock would you like to analyze?
-*good evening*,Good evening! Enter an S&P 500 stock ticker, and let’s review its financials.
+*hello*,"Hi there! I can help you analyze S&P 500 stocks. Just enter a stock ticker symbol."
+*hi*,"Hello! Please provide a stock ticker for an S&P 500 company to proceed."
+*hey*,"Hey! Type an S&P 500 stock ticker to get started."
+*good morning*,"Good morning! Enter an S&P 500 stock ticker for analysis."
+*good afternoon*,"Good afternoon! Which S&P 500 stock would you like to analyze?"
+*good evening*,"Good evening! Enter an S&P 500 stock ticker, and let’s review its financials."
 
-*what stocks do you cover*,We analyze only companies in the S&P 500. Please provide a valid stock ticker.
-*can I analyze any stock*,No, this bot is limited to S&P 500 stocks. Please enter a ticker from the index.
-*how do I use this bot*,Simply type an S&P 500 ticker (e.g., AAPL, MSFT) to receive a financial analysis.
-*where do you get data*,We retrieve financial data from SEC 10-Q filings of S&P 500 companies.
+*what stocks do you cover*,"We analyze only companies in the S&P 500. Please provide a valid stock ticker."
+*can I analyze any stock*,"No, this bot is limited to S&P 500 stocks. Please enter a ticker from the index."
+*how do I use this bot*,"Simply type an S&P 500 ticker (e.g., AAPL, MSFT) to receive a financial analysis."
+*where do you get data*,"We retrieve financial data from SEC 10-Q filings of S&P 500 companies."
 
-*is {ticker} in S&P 500*,Let me check... If {ticker} is in the S&P 500, I'll proceed with analysis.
-*what is {ticker}*,{ticker} is a company in the S&P 500. Would you like an analysis of its financials?
-*analyze {ticker}*,Analyzing {ticker}... Extracting key financial indicators from its latest 10-Q filing.
-*should I buy {ticker}*,Let’s evaluate {ticker}. I will check Free Cash Flow, Revenue Growth, and Operating Margin.
-*is {ticker} a good stock*,I can analyze {ticker} based on fundamentals. Let’s review its financial performance.
+*is * in S&P 500*,"Let me check... If the stock is in the S&P 500, I'll proceed with analysis."
+*what is *,"That is a company in the S&P 500. Would you like an analysis of its financials?"
+*analyze *,"Analyzing... Extracting key financial indicators from its latest 10-Q filing."
+*should I buy *,"Let’s evaluate this stock. I will check Free Cash Flow, Revenue Growth, and Operating Margin."
+*is * a good stock*,"I can analyze it based on fundamentals. Let’s review its financial performance."
 
-*what indicators do you use*,We use Free Cash Flow, Revenue Growth, and Operating Margin trends.
-*how does the buy/hold/sell work*,If 2+ indicators are bullish, it's a BUY. If 2+ are bearish, it's a SELL. Mixed signals mean HOLD.
-*can I get price data*,No, we do not use stock prices—only fundamentals from SEC 10-Q filings.
-*can I analyze crypto*,No, this bot only analyzes stocks in the S&P 500.
-*can I analyze ETFs*,No, we do not analyze ETFs—only individual companies in the S&P 500.
+*what indicators do you use*,"We use Free Cash Flow, Revenue Growth, and Operating Margin trends."
+*how does the buy/hold/sell work*,"If 2+ indicators are bullish, it's a BUY. If 2+ are bearish, it's a SELL. Mixed signals mean HOLD."
+*can I get price data*,"No, we do not use stock prices—only fundamentals from SEC 10-Q filings."
+*can I analyze crypto*,"No, this bot only analyzes stocks in the S&P 500."
+*can I analyze ETFs*,"No, we do not analyze ETFs—only individual companies in the S&P 500."
 
-*DEFAULT*,A stock ticker, dear user, or else all is but sound and fury, signifying nothing.
+*DEFAULT*,"A stock ticker, dear user, or else all is but sound and fury, signifying nothing."
