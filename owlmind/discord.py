@@ -1,120 +1,92 @@
-##
-## OwlMind - Platform for Education and Experimentation with Generative Intelligent Systems
-## discord.py :: Bot Runner for Discord
-##
-#  
-# Copyright (c) 2024 Dr. Fernando Koch, The Generative Intelligence Lab @ FAU
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights 
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-# 
-# Documentation and Getting Started:
-#    https://github.com/GenILab-FAU/owlmind
-#
-# Disclaimer: 
-# Generative AI has been used extensively while developing this package.
-# 
-
+import os
 import re
 import discord
-from .botengine import BotMessage, BotBrain
+import google.generativeai as genai
+from google.cloud import bigquery
 
-class DiscordBot(discord.Client):
+# Load API keys
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+
+# Configure Gemini 1.5 Pro
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-1.5-pro")
+
+# Initialize BigQuery client
+bq_client = bigquery.Client()
+
+# Discord Bot Client
+intents = discord.Intents.default()
+intents.message_content = True
+client = discord.Client(intents=intents)
+
+# BigQuery Table Info
+BQ_TABLE = "aialchemy.financial_data.sp500_metadata"
+
+async def validate_stock(stock_query):
+    """Check if a stock ticker or company name is valid using BigQuery."""
+    query = f"""
+    SELECT ticker, company_name FROM `{BQ_TABLE}`
+    WHERE LOWER(ticker) = '{stock_query.lower()}' OR LOWER(company_name) LIKE '%{stock_query.lower()}%'
+    LIMIT 1
     """
-    DiscordBot provides logic to connect the Discord Runner with OwlMind's BotMind, 
-    forming a multi-layered context in BotMessage by collecting elements of the Discord conversation
-    (layer1=user, layer2=thread, layer3=channel, layer4=guild), and aggregating attachments, reactions, and other elements.
+    query_job = bq_client.query(query)
+    results = list(query_job)
 
-    @EXAMPLE
-    How to use this class:
+    if results:
+        return results[0]['ticker'], results[0]['company_name']
+    return None, None
 
-    brain = MyBotMind(.) # Check documentation in botmind.py
-    TOKEN = {My Token}
-    bot = DiscordBot(token=TOKEN, brain=MyBotMind, debug=True)
-    bot.run()
-
-    @REQUIRED
-    Help needed:
-    @TODO Need to collect attachments, reactions, etc. (currently only loading text)
-    @TODO Need to return attachments, issue reactions, etc.
+async def guide_stock_selection():
+    """Use Gemini to guide users in selecting a stock."""
+    guidance_prompt = """
+    You are a financial assistant helping a user select a stock for analysis.
+    If the user has no preference, suggest well-known S&P 500 stocks from different sectors.
+    Ask clarifying questions to refine their choice.
     """
-    def __init__(self, token, brain:BotBrain, promiscous:bool=False, debug:bool=False):
-        self.token = token
-        self.promiscous = promiscous
-        self.debug = debug
-        self.brain = brain
-        if self.brain: self.brain.debug = debug
+    response = model.generate_content(guidance_prompt, generation_config={"temperature": 0.5, "max_output_tokens": 100})
+    return response.text.strip()
 
-        ## Discord attributes
-        intents = discord.Intents.default()
-        intents.messages = True
-        intents.reactions = True
-        intents.message_content = True
-        #intents.guilds = True
-        #intents.members = True
+@client.event
+async def on_ready():
+    print(f'✅ Bot is running as {client.user}')
 
-        super().__init__(intents=intents)
-        return 
-
-    async def on_ready(self):
-        print(f'Bot is running as: {self.user.name}.')
-        if self.debug: print(f'Debug is on!')
-        if self.brain: 
-            print(f'Bot is connected to {self.brain.__class__.__name__}({self.brain.id}).') 
-            if self.brain.announcement: print(self.brain.announcement)
-            self.brain.debug = self.debug
-        
-    async def on_message(self, message):
-        # CUT-SHORT conditions
-        # Only process if message does not come from itself, the bot is configured as promiscous, or this is a DM or mentions the bot
-        if message.author == self.user or \
-            (not self.promiscous and not (self.user in message.mentions or isinstance(message.channel, discord.DMChannel))):
-           if self.debug: print(f'IGNORING: orig={message.author.name}, dest={self.user}') 
-           return
-
-        # Remove calling @Mention if in the message
-        text = re.sub(r"<@\d+>", "", message.content,).strip()
-
-        # Collect attachments, reactions and others.
-        # @HERE TODO collect attachments, reactions, etc
-        attachments = None
-        reactions = None
-
-        # Create context
-        context = BotMessage(
-                layer1       = message.guild.id if message.guild else 0,
-                layer2       = message.channel.id if hasattr(message.channel, 'id') else 0,
-                layer3       = message.channel.id if isinstance(message.channel, discord.Thread) else 0,
-                layer4       = message.author.id,
-                server_name  = message.guild.name if message.guild else '#dm',
-                channel_name    = message.channel.name if hasattr(message.channel, 'name') else '#dm',
-                thread_name     = message.channel.name if isinstance(message.channel, discord.Thread) else '',
-                author_name     = message.author.name,
-                author_fullname = message.author.global_name,
-                message         = text,
-                attachments     = attachments,
-                reactions       = reactions)
-
-        if self.debug: print(f'PROCESSING: ctx={context}')
-                              
-        # Process through Brain
-        if self.brain:
-            self.brain.process(context)
-
-        # If the immediate processing of Context generated a result (sync mode), return it through the bot interface
-        # @HERE TODO return attachements, issue reactions, etc
-        if context.response:
-            await message.channel.send(context.response)
+@client.event
+async def on_message(message):
+    if message.author == client.user:
         return
 
-    def run(self):
-        super().run(self.token)
+    if message.content.startswith("!analyze"):
+        user_input = message.content.split(" ", 1)
 
+        if len(user_input) > 1:
+            stock_query = user_input[1]
+            ticker, company_name = await validate_stock(stock_query)
 
+            if ticker:
+                await message.channel.send(f"✅ Stock recognized: **{company_name} ({ticker})**. Passing to Agents 1 & 2...")
+                await process_stock(ticker, message)
+            else:
+                await message.channel.send("❌ Invalid stock ticker or company name. Try again.")
+        else:
+            suggestion = await guide_stock_selection()
+            await message.channel.send(suggestion)
+
+async def process_stock(ticker, message):
+    """Passes the stock to Agents 1 & 2 for analysis."""
+    formatted_query = f"""
+    User selected {ticker}.
+    Retrieve financials and 10-Q insights for {ticker}.
+    Analyze:
+    - Revenue Growth
+    - Free Cash Flow
+    - Operating Margins
+    - Key Management Discussion insights
+    """
+    await message.channel.send(f"📊 Analyzing {ticker}...")
+
+    # Forward to Agents 1 & 2
+    # Here, we should trigger Agent 1 (Financial Metrics) and Agent 2 (Text Summarization)
+    # Example: send to an async task queue or call directly.
+
+client.run(DISCORD_BOT_TOKEN)
