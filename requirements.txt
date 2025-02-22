@@ -1,6 +1,14 @@
-#
-# Requirements for Owlmind
+# Discord bot dependencies
+discord.py==2.3.2
+python-dotenv==1.0.0  # Load .env files
 
-discord==2.3.2
-python-dotenv==1.0.1
-audioop-lts; python_version>='3.13'
+# Google Gemini AI API
+google-generativeai==0.8.4  # For querying Gemini AI
+
+# Google Cloud Dependencies (BigQuery)
+google-cloud-bigquery==3.29.0
+google-cloud-core==2.4.2
+
+# Logging and Utilities
+pytz==2024.1  # Timezone support
+requests==2.31.0  # For making API requests (if needed)
