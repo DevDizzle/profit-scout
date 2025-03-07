@@ -12,3 +12,4 @@ google-cloud-core==2.4.2
 # Logging and Utilities
 pytz==2024.1  # Timezone support
 requests==2.31.0  # For making API requests (if needed)
+beautifulsoup4==4.11.1  # or the latest version
