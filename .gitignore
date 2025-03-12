@@ -1,18 +1,48 @@
-# Ignore Python cache files
-__pycache__/
+# 🚀 General Ignored Files
+.DS_Store
+*.log
+*.sqlite3
 *.pyc
 *.pyo
-
-# Ignore environment files
+*.swp
+*.swo
+__pycache__/
 .env
+.env.local
+
+# 🔒 Security: Prevent committing secrets
+config/.env
+aialchemy.json  # Google Service Account JSON key
+*.pem  # Any SSL or private key files
+
+# 🐍 Python Virtual Environments
 venv/
-*.venv/
+env/
+.venv/
+*.egg-info/
 
-# Ignore logs and temporary files
-*.log
-*.tmp
+# 🐳 Docker & Build Files
+docker/.dockerignore
+docker-compose.override.yml
+*.dockerfile
+*.tar
+*.out
 
-# Ignore OS-specific files
-.DS_Store
-Thumbs.db
+# ⚙️ IDE/Editor Files
+.vscode/
+.idea/
+*.iml
 
+# 📦 Package & Dependency Files
+node_modules/
+dist/
+build/
+*.lock
+
+# 📜 Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+
+# 🗑️ Miscellaneous
+tmp/
+logs/
+debug.log
