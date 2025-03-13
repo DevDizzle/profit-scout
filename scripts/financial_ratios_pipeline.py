@@ -6,216 +6,447 @@ import random
 import logging
 import requests
 import pandas as pd
-import pandas_gbq
-import yfinance as yf
+import numpy as np
+
 from datetime import datetime, timedelta
+from tenacity import retry, wait_exponential, stop_after_attempt
 from google.cloud import bigquery
 from google.oauth2 import service_account
-import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tenacity import retry, wait_exponential, stop_after_attempt
+import pandas_gbq
+import yfinance as yf
 
-# === CONFIGURABLE PARAMETERS ===
-SLEEP_TIME = (1, 3)  # Random sleep between 1 and 3 seconds after each ticker
-MAX_WORKERS = 10  # Number of parallel workers for fetching data
-CHUNK_SIZE = 50  # Number of tickers per batch for uploading to BigQuery
-# ===============================
+# =============================================================================
+#                           CONFIG & LOGGING
+# =============================================================================
 
-# Set up logging
+SLEEP_TIME = (3, 6)       # random sleep for market data
+MAX_DAYS_FORWARD = 5      # how many days forward we check from the 'end' date
+
 logger = logging.getLogger('financial_pipeline')
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+))
 logger.addHandler(handler)
 
-# SEC API headers
-headers = {
+SEC_HEADERS = {
     "User-Agent": "ProfitScout (eraphaelparra@gmail.com)",
     "Accept-Encoding": "gzip, deflate",
     "Host": "data.sec.gov"
 }
-CIK_MAPPING = {}
 
-def load_cik_mapping(metadata_csv):
-    """Load ticker -> CIK mapping from CSV, padding CIK with leading zeros."""
+CIK_MAPPING = {}  # global ticker -> padded CIK
+
+# =============================================================================
+#                     HELPER FUNCTIONS (SEC + METADATA)
+# =============================================================================
+
+def load_cik_mapping(metadata_csv: str) -> dict:
+    """
+    Read ticker->CIK from CSV, zero-pad the CIK to 10 digits.
+    """
     df = pd.read_csv(metadata_csv)
-    cik_map = {row['ticker'].upper(): str(row['cik']).zfill(10) for _, row in df.iterrows()}
-    logger.info(f"Loaded CIK mapping for {len(cik_map)} tickers.")
-    return cik_map
+    map_ = {}
+    for _, row in df.iterrows():
+        tkr = str(row['ticker']).upper()
+        cik_str = str(row['cik']).zfill(10)
+        map_[tkr] = cik_str
+    logger.info(f"Loaded CIK mapping for {len(map_)} tickers.")
+    return map_
+
+def _submission_url(cik: str) -> str:
+    return f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json"
+
+def _facts_url(cik: str) -> str:
+    return f"https://data.sec.gov/api/xbrl/companyfacts/CIK{int(cik):010d}.json"
 
 @retry(wait=wait_exponential(multiplier=1, max=10), stop=stop_after_attempt(3))
-def get_submission_data_for_ticker(ticker):
-    """Fetch recent filings from SEC submissions endpoint with retry logic."""
+def get_submission_data_for_ticker(ticker: str) -> pd.DataFrame:
+    """
+    Fetch recent SEC submissions for a single ticker (based on CIK).
+    Raises if no data or HTTP error.
+    """
     cik = CIK_MAPPING.get(ticker)
     if not cik:
-        logger.error(f"No CIK found for ticker {ticker}")
-        raise ValueError(f"No CIK for {ticker}")
-    url = f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json"
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    return pd.DataFrame(response.json().get("filings", {}).get("recent", {}))
+        raise ValueError(f"No CIK for ticker {ticker}")
 
-def get_latest_filing(ticker):
-    """Get the latest 10-Q or 10-K filing by filing date."""
+    url = _submission_url(cik)
+    resp = requests.get(url, headers=SEC_HEADERS)
+    resp.raise_for_status()
+    data = resp.json().get("filings", {}).get("recent", {})
+    return pd.DataFrame(data)
+
+def get_latest_filing_info(ticker: str):
+    """
+    Return (accessionNumber, formType, filingDate) for the most recent 10-K or 10-Q.
+    If none, return (None, None, None).
+    """
     try:
         df = get_submission_data_for_ticker(ticker)
-        filtered_df = df[df['form'].isin(['10-Q', '10-K'])].copy()
-        if filtered_df.empty:
-            logger.warning(f"No 10-Q or 10-K filings found for {ticker}")
+        relevant = df[df['form'].isin(['10-K', '10-Q'])].copy()
+        if relevant.empty:
+            logger.warning(f"No 10-K or 10-Q for {ticker}")
             return None, None, None
-        filtered_df['filed'] = pd.to_datetime(filtered_df['filingDate'], errors='coerce')
-        recent_filing = filtered_df.sort_values('filed', ascending=False).iloc[0]
-        logger.info(f"Latest filing for {ticker}: {recent_filing['form']} on {recent_filing['filed'].date()}")
-        return recent_filing['accessionNumber'], recent_filing['form'], recent_filing['filed']
-    except Exception as e:
-        logger.error(f"Error fetching latest filing for {ticker}: {e}")
+
+        relevant['filingDate'] = pd.to_datetime(relevant['filingDate'], errors='coerce')
+        recent = relevant.sort_values('filingDate', ascending=False).iloc[0]
+        return recent['accessionNumber'], recent['form'], recent['filingDate']
+    except Exception as exc:
+        logger.error(f"Error fetching filing info for {ticker}: {exc}")
         return None, None, None
 
 @retry(wait=wait_exponential(multiplier=1, max=10), stop=stop_after_attempt(3))
-def get_facts(ticker):
-    """Fetch XBRL company facts from SEC with retry logic."""
+def get_facts_json(ticker: str) -> dict:
+    """
+    Fetch XBRL company facts JSON from SEC for a given ticker's CIK.
+    """
     cik = CIK_MAPPING.get(ticker)
     if not cik:
-        logger.error(f"No CIK found for ticker {ticker}")
-        raise ValueError(f"No CIK for {ticker}")
-    url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{int(cik):010d}.json"
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    return response.json()
+        raise ValueError(f"No CIK for ticker {ticker}")
 
-def facts_to_df(company_facts):
-    """Convert XBRL facts into a DataFrame, handling 'None' as NaN."""
+    url = _facts_url(cik)
+    resp = requests.get(url, headers=SEC_HEADERS)
+    resp.raise_for_status()
+    return resp.json()
+
+def facts_to_df(facts_json: dict) -> pd.DataFrame:
+    """
+    Convert 'us-gaap' portion of XBRL facts into a Pandas DataFrame.
+    """
     df = pd.DataFrame()
-    facts = company_facts.get('facts', {}).get('us-gaap', {})
-    if not facts:
+    gaap_facts = facts_json.get('facts', {}).get('us-gaap', {})
+    if not gaap_facts:
         logger.warning("No us-gaap facts found.")
         return df
-    for report in facts.values():
-        units = report.get('units', {})
+
+    for fact_key, fact_val in gaap_facts.items():
+        units = fact_val.get('units', {})
         if not units:
             continue
-        for unit_data in units.values():
-            temp_df = pd.DataFrame(unit_data)
+        for _, entries in units.items():
+            temp_df = pd.DataFrame(entries)
+            # Drop columns and rows that are completely NA
             temp_df = temp_df.dropna(axis=1, how='all')
+            temp_df = temp_df.dropna(axis=0, how='all')
             if temp_df.empty:
                 continue
+
             if 'val' in temp_df.columns:
-                temp_df['val'] = pd.to_numeric(temp_df['val'].replace('None', np.nan), errors='coerce')
-            temp_df['item'] = report.get('label')
-            df = pd.concat([df, temp_df], ignore_index=True)
+                temp_df['val'] = pd.to_numeric(
+                    temp_df['val'].replace('None', np.nan), 
+                    errors='coerce'
+                )
+            temp_df['item'] = fact_val.get('label', fact_key)
+
+            if not temp_df.empty:
+                df = pd.concat([df, temp_df], ignore_index=True)
+
     return df
 
-def get_latest_metrics(ticker):
-    """Fetch latest financial metrics from the most recent filing."""
-    logger.info(f"Fetching metrics for {ticker}...")
-    accession_number, form_type, filing_date = get_latest_filing(ticker)
-    if not accession_number:
+def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
+    """
+    1) Get the most recent 10-K/10-Q info (accession, form, filing_date).
+    2) Pull the company facts from SEC.
+    3) Filter to the last 'end' date in that dataset, ignoring future 'end' > today.
+    """
+    accession, form_type, filing_date = get_latest_filing_info(ticker)
+    if not accession:
         return pd.DataFrame()
+
     try:
-        facts = get_facts(ticker)
-        df_facts = facts_to_df(facts)
+        data_json = get_facts_json(ticker)
+        df_facts = facts_to_df(data_json)
         if df_facts.empty:
-            logger.warning(f"No facts retrieved for {ticker} from {form_type} (filed: {filing_date}).")
             return pd.DataFrame()
+
         df_facts['end'] = pd.to_datetime(df_facts['end'], errors='coerce')
-        recent_date = df_facts['end'].max()
-        recent_facts = df_facts[df_facts['end'] == recent_date].copy()
-        recent_facts['accn'] = accession_number
-        recent_facts['form'] = form_type
-        recent_facts['filed'] = pd.to_datetime(filing_date, errors='coerce')
-        logger.info(f"Retrieved {len(recent_facts)} records for {ticker} from {form_type} (filed: {filing_date}).")
-        return recent_facts
-    except Exception as e:
-        logger.error(f"Error processing facts for {ticker}: {e}")
+        # Exclude future dates
+        today = pd.Timestamp.today().normalize()
+        df_facts = df_facts[df_facts['end'] <= today]
+        if df_facts.empty:
+            logger.info(f"{ticker}: All 'end' dates are in the future, skipping.")
+            return pd.DataFrame()
+
+        last_date = df_facts['end'].max()
+        recent = df_facts[df_facts['end'] == last_date].copy()
+
+        recent['accn'] = accession
+        recent['form'] = form_type
+        recent['filed'] = filing_date
+        return recent
+    except Exception as exc:
+        logger.error(f"Error fetching facts for {ticker}: {exc}")
         return pd.DataFrame()
 
-def load_all_financial_metrics(metadata_csv):
-    """Fetch SEC data for all tickers in parallel."""
+# =============================================================================
+#                     PIPELINE: FETCH SEC FINANCIAL METRICS
+# =============================================================================
+
+def load_all_financial_metrics(metadata_csv: str) -> pd.DataFrame:
+    """
+    1) Load metadata
+    2) Loop over ALL tickers
+    3) Fetch last-filed facts
+    4) Return combined DataFrame
+    """
     global CIK_MAPPING
-    metadata_df = pd.read_csv(metadata_csv)
     CIK_MAPPING = load_cik_mapping(metadata_csv)
-    tickers = metadata_df['ticker'].str.upper().tolist()
 
-    all_metrics = []
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_ticker = {executor.submit(get_latest_metrics, ticker): ticker for ticker in tickers}
-        for future in as_completed(future_to_ticker):
-            ticker = future_to_ticker[future]
-            try:
-                metrics_df = future.result()
-                if not metrics_df.empty:
-                    metrics_df['ticker'] = ticker
-                    metadata_row = metadata_df[metadata_df['ticker'].str.upper() == ticker].iloc[0]
-                    metrics_df['company_name'] = metadata_row.get('company_name', pd.NA)
-                    metrics_df['sic_code'] = metadata_row.get('sic_code', pd.NA)
-                    metrics_df['industry_name'] = metadata_row.get('industry_name', pd.NA)
-                    metrics_df['sec_filing_url'] = metadata_row.get('sec_filing_url', pd.NA)
-                    all_metrics.append(metrics_df)
-            except Exception as e:
-                logger.error(f"Error processing {ticker}: {e}")
-    return pd.concat(all_metrics, ignore_index=True) if all_metrics else pd.DataFrame()
+    meta_df = pd.read_csv(metadata_csv)
+    tickers = meta_df['ticker'].str.upper().unique().tolist()
+    logger.info(f"Fetching SEC metrics for {len(tickers)} tickers...")
 
-def fetch_market_data(tickers_df):
-    """Fetch market data from Yahoo Finance for filing dates in parallel."""
-    market_data = []
-    tickers_df['filed'] = pd.to_datetime(tickers_df['filed'], errors='coerce')
-
-    def fetch_single_ticker(row):
-        ticker = row['ticker']
-        company_name = row['company_name']
-        filing_date = pd.to_datetime(row['filed']).date()
-        logger.info(f"Fetching market data for {ticker} on {filing_date}...")
+    all_frames = []
+    for i, ticker in enumerate(tickers, 1):
+        logger.info(f"[{i}/{len(tickers)}] Processing ticker: {ticker}")
         try:
-            stock = yf.Ticker(ticker)
-            df_history = stock.history(start=filing_date, end=filing_date + timedelta(days=1))
-            if df_history.empty:
-                logger.warning(f"No market data for {ticker} on {filing_date}.")
-                return []
-            price = df_history['Close'].iloc[0]
-            if pd.isna(price):
-                logger.warning(f"Invalid price for {ticker} on {filing_date}.")
-                return []
-            market_cap = None
-            for attempt in range(3):
+            df_facts = get_latest_filing_facts(ticker)
+            if df_facts.empty:
+                logger.info(f"No valid facts found for {ticker}. Skipping.")
+                continue
+
+            logger.info(f"  => Fetched {len(df_facts)} fact rows for {ticker}")
+
+            df_facts['ticker'] = ticker
+            # attach metadata columns
+            row = meta_df[meta_df['ticker'].str.upper() == ticker].iloc[0]
+            df_facts['company_name'] = row.get('company_name', pd.NA)
+            df_facts['industry_name'] = row.get('industry_name', pd.NA)
+            df_facts['segment'] = row.get('segment', pd.NA)
+
+            all_frames.append(df_facts)
+        except Exception as e:
+            logger.error(f"Error for ticker {ticker}: {e}")
+
+    if not all_frames:
+        logger.info("No data frames were collected from SEC for any ticker.")
+        return pd.DataFrame()
+    return pd.concat(all_frames, ignore_index=True)
+
+# =============================================================================
+#                     PIPELINE: FETCH MARKET DATA (SERIAL)
+# =============================================================================
+
+def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) -> dict:
+    """
+    For the given 'reported_date' (the last reported 'end' from SEC),
+    we try up to MAX_DAYS_FORWARD to find the first trading day with data.
+    Return a *single dict* with:
+      [ticker, as_of_date, actual_market_date, market_price, market_cap, dividend].
+    """
+    if pd.isna(reported_date):
+        return {}
+
+    base_date = reported_date.date() if hasattr(reported_date, 'date') else reported_date
+
+    for offset in range(MAX_DAYS_FORWARD + 1):
+        try_date = base_date + timedelta(days=offset)
+        # skip weekend quickly
+        if try_date.weekday() >= 5:
+            continue
+
+        # polite, random sleep
+        time.sleep(random.uniform(*SLEEP_TIME))
+
+        stock = yf.Ticker(ticker)
+        try:
+            hist = stock.history(start=try_date, end=try_date + timedelta(days=1), interval='1d')
+            if hist.empty:
+                continue
+
+            close_price = hist['Close'].iloc[0]
+            if pd.isna(close_price):
+                continue
+
+            # Attempt to gather market cap from sharesOutstanding
+            info = {}
+            for _ in range(3):
                 try:
                     info = stock.info
-                    shares_outstanding = info.get('sharesOutstanding')
-                    if shares_outstanding:
-                        market_cap = price * float(shares_outstanding)
-                    else:
-                        market_cap = info.get('marketCap')
                     break
                 except Exception as e:
-                    logger.warning(f"Attempt {attempt+1} failed for {ticker}: {e}")
+                    logger.warning(f"Retry reading 'stock.info' for {ticker}: {e}")
                     time.sleep(2)
-            return [
-                {
-                    'ticker': ticker, 'item': 'Market_Price', 'val': float(price),
-                    'date': filing_date.isoformat(), 'filed': pd.to_datetime(row['filed']),
-                    'company_name': company_name, 'fy': None, 'fp': None, 'form': None,
-                    'frame': None, 'start': None, 'end': None, 'sic_code': '',
-                    'industry_name': '', 'sec_filing_url': ''
-                },
-                {
-                    'ticker': ticker, 'item': 'Market_Cap', 'val': float(market_cap) if market_cap else np.nan,
-                    'date': filing_date.isoformat(), 'filed': pd.to_datetime(row['filed']),
-                    'company_name': company_name, 'fy': None, 'fp': None, 'form': None,
-                    'frame': None, 'start': None, 'end': None, 'sic_code': '',
-                    'industry_name': '', 'sec_filing_url': ''
-                }
-            ]
-        except Exception as e:
-            logger.error(f"Error fetching market data for {ticker}: {e}")
-            return []
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_row = {executor.submit(fetch_single_ticker, row): row for _, row in tickers_df.iterrows()}
-        for future in as_completed(future_to_row):
-            market_data.extend(future.result())
-    return market_data
+            shares_outstanding = info.get('sharesOutstanding')
+            if shares_outstanding:
+                market_cap = close_price * float(shares_outstanding)
+            else:
+                market_cap = info.get('marketCap', np.nan)
+
+            dividend = info.get('dividendRate', 0.0)
+
+            return {
+                'ticker': ticker,
+                'as_of_date': str(base_date),  # The original 'end' date
+                'actual_market_date': str(try_date),
+                'market_price': float(close_price),
+                'market_cap': float(market_cap) if market_cap else np.nan,
+                'dividend': float(dividend),
+            }
+        except Exception as exc:
+            logger.error(f"Error fetching Yahoo data for {ticker} on {try_date}: {exc}")
+            continue
+
+    return {}
+
+def fetch_market_data(sec_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    SERIAL approach: For each unique (ticker, end) pair, fetch exactly one row of market data.
+    """
+    needed = sec_df[['ticker', 'end']].drop_duplicates()
+    needed = needed.dropna(subset=['ticker', 'end'])
+
+    results = []
+    total = len(needed)
+    logger.info(f"Fetching market data for {total} (ticker, end) pairs (SERIAL).")
+    count = 0
+
+    for _, row in needed.iterrows():
+        count += 1
+        ticker = row['ticker']
+        end_date = row['end']
+        logger.info(f"[{count}/{total}] Fetching market data for {ticker} (end={end_date.date()})...")
+        data_dict = fetch_single_ticker_market_data(ticker, end_date)
+        if data_dict:
+            logger.info(f"  => Found market data on date={data_dict['actual_market_date']} price={data_dict['market_price']}")
+            results.append(data_dict)
+        else:
+            logger.info(f"  => No market data found for {ticker} near {end_date.date()}")
+
+    if not results:
+        logger.warning("No market data results at all!")
+        return pd.DataFrame()
+    return pd.DataFrame(results)
+
+# =============================================================================
+#                     PIPELINE: CALCULATE RATIOS & FINAL OUTPUT
+# =============================================================================
+
+def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    1) Pivot SEC data on (ticker, company_name, industry_name, segment, end).
+    2) Merge with market_df on (ticker, as_of_date).
+    3) Calculate ratios.
+    4) Return final with extra columns: industry_name, segment, etc.
+    """
+
+    if sec_df.empty:
+        logger.warning("SEC DataFrame is empty! No ratios to compute.")
+        return pd.DataFrame()
+
+    if market_df.empty:
+        logger.warning("Market DataFrame is empty! No ratios to compute.")
+        return pd.DataFrame()
+
+    logger.info("Pivoting SEC data to compute ratios...")
+
+    # Fill missing grouping columns so pivot_table won't drop rows
+    sec_df['company_name'] = sec_df['company_name'].fillna('UnknownCompany')
+    sec_df['industry_name'] = sec_df['industry_name'].fillna('UnknownIndustry')
+    sec_df['segment'] = sec_df['segment'].fillna('UnknownSegment')
+
+    pivot_cols = ['ticker', 'company_name', 'industry_name', 'segment', 'end']
+    df_sec = sec_df[pivot_cols + ['item', 'val']].copy().dropna(subset=['ticker', 'end', 'item'])
+
+    pivoted = df_sec.pivot_table(
+        index=pivot_cols,
+        columns='item',
+        values='val',
+        aggfunc='max'
+    ).reset_index()
+
+    pivoted['as_of_date'] = pivoted['end'].dt.date.astype(str)
+
+    # Standard item mapping
+    standard_map = {
+        "Net Income": [
+            "Net Income (Loss) Attributable to Parent",
+            "Net Income (Loss) Available to Common Stockholders, Basic"
+        ],
+        "Total Equity": [
+            "Stockholders' Equity Attributable to Parent",
+            "StockholdersEquity"
+        ],
+        "Total Debt": ["Liabilities"],
+        "Current Assets": ["Assets, Current"],
+        "Current Liabilities": ["Liabilities, Current"],
+        "Revenues": [
+            "Revenue from Contract with Customer, Excluding Assessed Tax",
+            "Revenues"
+        ],
+        "Cost of Goods Sold": ["Cost of Goods and Services Sold"],
+        "Earnings Per Share": ["Earnings Per Share, Basic", "EPSBasic"],
+        "Operating Cash Flow": ["Net Cash Provided by (Used in) Operating Activities"],
+        "CapEx": ["Payments to Acquire Property, Plant, and Equipment"]
+    }
+
+    for std_item, synonyms in standard_map.items():
+        found_cols = [c for c in synonyms if c in pivoted.columns]
+        if found_cols:
+            pivoted[std_item] = pivoted[found_cols].bfill(axis=1).iloc[:, 0]
+        else:
+            pivoted[std_item] = np.nan
+
+    logger.info(f"Merging pivoted SEC data (shape={pivoted.shape}) with market data (shape={market_df.shape})")
+    merged = pd.merge(
+        pivoted,
+        market_df,
+        how='left',
+        on=['ticker', 'as_of_date']
+    )
+
+    if merged.empty:
+        logger.warning("Final merge returned an empty DataFrame. No matching (ticker, as_of_date).")
+        return pd.DataFrame()
+
+    # Calculate ratios
+    merged['ROE'] = merged['Net Income'] / merged['Total Equity']
+    merged['Debt_to_Equity'] = merged['Total Debt'] / merged['Total Equity']
+    merged['Current_Ratio'] = merged['Current Assets'] / merged['Current Liabilities']
+    merged['Gross_Margin'] = (
+        (merged['Revenues'] - merged.get('Cost of Goods Sold', 0.0))
+        / merged['Revenues']
+    )
+    merged['Free_Cash_Flow'] = merged['Operating Cash Flow'] - merged.get('CapEx', 0.0)
+    merged['P_E_Ratio'] = merged['market_price'] / merged['Earnings Per Share']
+    merged['FCF_Yield'] = merged['Free_Cash_Flow'] / merged['market_cap']
+
+    final_cols = [
+        'ticker',
+        'company_name',
+        'industry_name',
+        'segment',
+        'as_of_date',
+        'market_price',
+        'market_cap',
+        'dividend',
+        'ROE',
+        'Debt_to_Equity',
+        'Current_Ratio',
+        'Gross_Margin',
+        'P_E_Ratio',
+        'FCF_Yield'
+    ]
+    final_df = merged[final_cols].drop_duplicates()
+    logger.info(f"Final DataFrame shape: {final_df.shape}")
+    return final_df
+
+# =============================================================================
+#                                 MAIN
+# =============================================================================
 
 def main(event=None, context=None):
-    # Load credentials
+    """
+    1. Load GCP credentials
+    2. Read metadata
+    3. Fetch SEC data (ALL tickers)
+    4. Fetch Yahoo market data (serial)
+    5. Calculate ratios
+    6. Upload final table to BigQuery
+    """
+    # 1) Credentials
     key_path = "/home/eraphaelparra/aialchemy.json"
     credentials = service_account.Credentials.from_service_account_file(
         key_path, scopes=['https://www.googleapis.com/auth/cloud-platform']
@@ -223,97 +454,41 @@ def main(event=None, context=None):
     client = bigquery.Client(project='aialchemy', credentials=credentials)
     logger.info(f"Using credentials from {key_path}")
 
-    # Step 1: Fetch SEC data
+    # 2) Metadata CSV
     metadata_csv_path = "/home/eraphaelparra/profit-scout/data/sp500_metadata.csv"
-    logger.info("Fetching SEC data for S&P 500 tickers.")
+
+    # 3) Fetch SEC data (for all tickers in CSV)
     sec_df = load_all_financial_metrics(metadata_csv_path)
-
-    if not sec_df.empty:
-        sec_df = sec_df.sort_values('filed').groupby('ticker').tail(1)
-        sec_df['filed'] = pd.to_datetime(sec_df['filed'], errors='coerce')
-        pandas_gbq.to_gbq(
-            sec_df, 'aialchemy.financial_data.financial_metrics', project_id='aialchemy',
-            if_exists='replace', credentials=credentials
-        )
-        logger.info(f"Uploaded {len(sec_df)} rows to financial_metrics.")
-    else:
-        logger.error("No SEC data fetched.")
+    if sec_df.empty:
+        logger.error("No SEC data returned. Exiting.")
         return
+    logger.info(f"SEC DataFrame shape: {sec_df.shape}")
 
-    # Step 2: Fetch market data
-    tickers_df = sec_df[['ticker', 'company_name', 'filed']].drop_duplicates()
-    market_data = fetch_market_data(tickers_df)
-
-    if market_data:
-        market_df = pd.DataFrame(market_data)
-        market_df['filed'] = pd.to_datetime(market_df['filed'], errors='coerce')
-        market_df['val'] = pd.to_numeric(market_df['val'], errors='coerce')
-        for col in market_df.columns:
-            if market_df[col].dtype == 'object' and col != 'filed':
-                market_df[col] = market_df[col].astype(str)
-        pandas_gbq.to_gbq(
-            market_df, 'aialchemy.financial_data.financial_metrics', project_id='aialchemy',
-            if_exists='append', credentials=credentials
-        )
-        logger.info(f"Appended {len(market_df)} market data rows.")
-    else:
-        logger.error("No market data fetched.")
+    # 4) Fetch market data
+    market_df = fetch_market_data(sec_df)
+    if market_df.empty:
+        logger.error("No market data fetched. Exiting.")
         return
+    logger.info(f"Market DataFrame shape: {market_df.shape}")
 
-    # Step 3: Calculate ratios
-    query = "SELECT company_name, ticker, item, val, filed FROM `aialchemy.financial_data.financial_metrics`"
-    df = client.query(query).to_dataframe()
-    df['filed'] = pd.to_datetime(df['filed'], errors='coerce')
-    df['val'] = pd.to_numeric(df['val'], errors='coerce')
-    metrics_pivot = df.pivot_table(
-        index=['company_name', 'ticker', 'filed'], columns='item', values='val', aggfunc='max'
-    ).reset_index()
-    metrics_pivot.columns = [col if isinstance(col, str) else col[1] for col in metrics_pivot.columns]
+    # 5) Calculate ratios
+    final_df = calculate_ratios(sec_df, market_df)
+    if final_df.empty:
+        logger.warning("Final DataFrame is empty; nothing to upload. Exiting.")
+        return
+    logger.info(f"Final table shape: {final_df.shape}")
 
-    standard_mapping = {
-        "Net Income": ["Net Income (Loss) Attributable to Parent"],
-        "Total Equity": ["Stockholders' Equity Attributable to Parent"],
-        "Total Debt": ["Liabilities"],
-        "Current Assets": ["Assets, Current"],
-        "Current Liabilities": ["Liabilities, Current"],
-        "Revenues": ["Revenue from Contract with Customer, Excluding Assessed Tax", "Revenues"],
-        "Cost of Goods Sold": ["Cost of Goods and Services Sold"],
-        "Earnings Per Share": ["Earnings Per Share, Basic"],
-        "Market Price": ["Market_Price"],
-        "Operating Cash Flow": ["Net Cash Provided by (Used in) Operating Activities"],
-        "Payments to Acquire Property, Plant, and Equipment": ["Payments to Acquire Property, Plant, and Equipment"],
-        "Market Cap": ["Market_Cap"]
-    }
-
-    for standard_name, possible_names in standard_mapping.items():
-        available_columns = [col for col in possible_names if col in metrics_pivot.columns]
-        if available_columns:
-            metrics_pivot[standard_name] = metrics_pivot[available_columns].bfill(axis=1).iloc[:, 0]
-        else:
-            metrics_pivot[standard_name] = np.nan
-
-    metrics_pivot['ROE'] = metrics_pivot['Net Income'] / metrics_pivot['Total Equity']
-    metrics_pivot['Debt_to_Equity'] = metrics_pivot['Total Debt'] / metrics_pivot['Total Equity']
-    metrics_pivot['Current_Ratio'] = metrics_pivot['Current Assets'] / metrics_pivot['Current Liabilities']
-    metrics_pivot['Gross_Margin'] = (metrics_pivot['Revenues'] - metrics_pivot.get('Cost of Goods Sold', 0)) / metrics_pivot['Revenues']
-    metrics_pivot['Free_Cash_Flow'] = metrics_pivot['Operating Cash Flow'] - metrics_pivot.get('Payments to Acquire Property, Plant, and Equipment', 0)
-    metrics_pivot['P_E_Ratio'] = metrics_pivot['Market Price'] / metrics_pivot['Earnings Per Share']
-    metrics_pivot['FCF_Yield'] = metrics_pivot['Free_Cash_Flow'] / metrics_pivot['Market Cap']
-
-    ratios_df = metrics_pivot.melt(
-        id_vars=['company_name', 'ticker', 'filed'],
-        value_vars=['ROE', 'Debt_to_Equity', 'Current_Ratio', 'Gross_Margin', 'P_E_Ratio', 'FCF_Yield'],
-        var_name='Ratio', value_name='Value'
-    ).dropna(subset=['Value'])
-    ratios_df.rename(columns={'company_name': 'Company_Name', 'ticker': 'Ticker'}, inplace=True)
-    ratios_df['filed'] = pd.to_datetime(ratios_df['filed'], errors='coerce')
-
+    # 6) Upload final table to BigQuery
+    table_id = "aialchemy.financial_data.financial_ratios_final_all"
+    logger.info(f"Uploading final table to {table_id}...")
     pandas_gbq.to_gbq(
-        ratios_df, 'aialchemy.financial_data.financial_ratios', project_id='aialchemy',
-        if_exists='replace', credentials=credentials
+        final_df,
+        destination_table=table_id,
+        project_id='aialchemy',
+        if_exists='replace',
+        credentials=credentials
     )
-    logger.info(f"Created financial_ratios with {len(ratios_df)} rows.")
-    logger.info("Pipeline completed successfully!")
+    logger.info(f"Uploaded final table with {len(final_df)} rows to {table_id}. Pipeline complete.")
 
 if __name__ == "__main__":
     main()
