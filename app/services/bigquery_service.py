@@ -24,9 +24,8 @@ def validate_stock(stock_query: str):
             logger.warning(f"❌ Stock not found in BigQuery: {stock_query}")
             return None
     except Exception as e:
-        logger.error(f"❌ BigQuery error during stock validation: {e}")
+        logger.error(f"❌ BigQuery error: {e}")
         return None
-
 
 def get_financial_ratios(ticker: str):
     logger.debug(f"📊 Querying financial ratios for ticker: {ticker}")
@@ -52,11 +51,10 @@ def get_financial_ratios(ticker: str):
         result = query_job.result()
         row = next(result, None)
 
-        if row is None:
+        if not row:
             logger.warning(f"❌ No financial ratios found for {ticker}")
             return None
 
-        # Explicitly handle null values gracefully:
         ratios = {
             "ROE": row["ROE"],
             "Debt_to_Equity": row["Debt_to_Equity"],
