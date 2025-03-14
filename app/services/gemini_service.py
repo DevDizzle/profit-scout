@@ -2,7 +2,6 @@ import google.generativeai as genai
 from app.models.ratios import FinancialRatios
 from app.utils.logger import logger  # Import custom logger
 
-# Configure Gemini API with the updated model
 model = genai.GenerativeModel("gemini-2.0-flash")
 
 def suggest_stocks(user_query: str):
@@ -10,20 +9,20 @@ def suggest_stocks(user_query: str):
     logger.info(f"📡 Sending stock suggestion request to Gemini: {user_query}")
 
     prompt = f"""
-    You are an AI financial assistant. Suggest **three** S&P 500 stocks relevant to:
+    You are a financial expert. Suggest three diversified S&P 500 stocks based on the following request:
     
-    - User query: "{user_query}"
+    "{user_query}"
     
-    Ensure **diversification** across sectors. Provide a short **reason** for each pick.
+    Briefly explain why each stock is suitable for the query, ensuring sector diversification.
     """
 
     try:
         response = model.generate_content(
             prompt,
-            generation_config={"temperature": 0.5, "max_output_tokens": 8912}
+            generation_config={"temperature": 0.5, "max_output_tokens": 1024}
         )
         result = response.text.strip() if response.text else "No response from Gemini"
-        logger.info(f"✅ Gemini stock suggestions received successfully")
+        logger.info("✅ Gemini stock suggestions received successfully")
         return result
     except Exception as e:
         logger.error(f"❌ Gemini API error: {e}")
@@ -34,7 +33,7 @@ def analyze_stock(ticker: str, ratios: FinancialRatios):
     logger.info(f"📡 Sending financial analysis request to Gemini for {ticker}")
 
     prompt = f"""
-    You are a financial AI analyzing {ticker}. Based on the following key financial ratios, determine whether an investor should **BUY, HOLD, or SELL**.
+    You're a financial analyst providing advice on {ticker} based on these key financial ratios:
 
     - **Return on Equity (ROE)**: {ratios.ROE}
     - **Debt to Equity Ratio**: {ratios.Debt_to_Equity}
@@ -43,13 +42,13 @@ def analyze_stock(ticker: str, ratios: FinancialRatios):
     - **P/E Ratio**: {ratios.P_E_Ratio}
     - **FCF Yield**: {ratios.FCF_Yield}
 
-    Provide a **financial analysis** and a final **BUY, HOLD, or SELL** recommendation.
+    Provide a concise financial analysis and clearly conclude with a **BUY, HOLD, or SELL** recommendation.
     """
 
     try:
         response = model.generate_content(
             prompt,
-            generation_config={"temperature": 0.5, "max_output_tokens": 8912}
+            generation_config={"temperature": 0.5, "max_output_tokens": 1024}
         )
         result = response.text.strip() if response.text else "No response from Gemini"
         logger.info(f"✅ Gemini stock analysis received successfully for {ticker}")
