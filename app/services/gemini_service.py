@@ -2,8 +2,8 @@ import google.generativeai as genai
 from app.models.ratios import FinancialRatios
 from app.utils.logger import logger  # Import custom logger
 
-# Configure Gemini API
-model = genai.GenerativeModel("gemini-1.5-pro")
+# Configure Gemini API with the updated model
+model = genai.GenerativeModel("gemini-2.0-flash")
 
 def suggest_stocks(user_query: str):
     """Generate stock suggestions using Gemini AI."""
@@ -20,7 +20,7 @@ def suggest_stocks(user_query: str):
     try:
         response = model.generate_content(
             prompt,
-            generation_config={"temperature": 0.5, "max_output_tokens": 200}
+            generation_config={"temperature": 0.5, "max_output_tokens": 8912}
         )
         result = response.text.strip() if response.text else "No response from Gemini"
         logger.info(f"✅ Gemini stock suggestions received successfully")
@@ -49,7 +49,7 @@ def analyze_stock(ticker: str, ratios: FinancialRatios):
     try:
         response = model.generate_content(
             prompt,
-            generation_config={"temperature": 0.5, "max_output_tokens": 400}
+            generation_config={"temperature": 0.5, "max_output_tokens": 8912}
         )
         result = response.text.strip() if response.text else "No response from Gemini"
         logger.info(f"✅ Gemini stock analysis received successfully for {ticker}")
