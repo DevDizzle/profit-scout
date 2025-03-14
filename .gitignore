@@ -19,6 +19,7 @@ aialchemy.json  # Google Service Account JSON key
 venv/
 env/
 .venv/
+pipeline-env/
 *.egg-info/
 
 # 🐳 Docker & Build Files

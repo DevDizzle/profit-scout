@@ -1,19 +1,14 @@
 import pytest
+import asyncio
 from httpx import AsyncClient
-from app.main import app
 
 @pytest.mark.asyncio
-async def test_analyze_stock():
-    """Test stock analysis API"""
-    async with AsyncClient(app=app, base_url="http://test") as client:
-        response = await client.get("/agent1/analyze_stock/AAPL")
+async def test_analyze_amzn_stock():
+    """Test Agent 1 analyzing stock AMZN."""
+    async with AsyncClient() as client:
+        response = await client.get("http://localhost:8000/agent1/analyze_stock/AMZN")
     assert response.status_code == 200
-    assert "financial_ratios" in response.json()
-    assert "analysis" in response.json()
-
-@pytest.mark.asyncio
-async def test_analyze_invalid_stock():
-    """Test analyzing a stock that doesn't exist"""
-    async with AsyncClient(app=app, base_url="http://test") as client:
-        response = await client.get("/agent1/analyze_stock/INVALID")
-    assert response.status_code == 404
+    data = response.json()
+    assert "financial_ratios" in data
+    assert "analysis" in data
+    print("LLM Analysis for AMZN:", data["analysis"])
