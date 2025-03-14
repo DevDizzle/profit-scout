@@ -4,7 +4,7 @@ from app.services.bigquery_service import get_financial_ratios
 from app.services.gemini_service import analyze_stock
 from app.utils.logger import logger  # Import logger
 
-router = APIRouter(prefix="/agent1")  # Recommended: explicitly set prefix "/agent1"
+router = APIRouter(prefix="/agent1")  # explicitly set prefix "/agent1"
 
 @router.get("/analyze_stock/{ticker}")
 async def analyze_stock_api(ticker: str):
