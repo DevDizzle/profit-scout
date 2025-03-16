@@ -1,15 +1,18 @@
+import os
+from dotenv import load_dotenv
 import google.generativeai as genai
-from typing import Optional
+from app.utils.logger import logger
 from app.models.ratios import FinancialRatios
-from app.utils.logger import logger  # Import custom logger
 
-# Configure Gemini API with grounding enabled
+load_dotenv()  # clearly loads from .env file
+
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
 model = genai.GenerativeModel(
     "gemini-2.0-flash",
     generation_config={"temperature": 0.5, "max_output_tokens": 1024},
     tools=[{"name": "GoogleSearch"}]
 )
-
 
 def build_analysis_prompt(ticker: str, ratios: FinancialRatios):
     prompt = f"You are an expert financial analyst evaluating {ticker}.\n\n"
