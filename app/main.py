@@ -28,7 +28,7 @@ logging.basicConfig(
 # Initialize FastAPI App
 app = FastAPI(title=config["app"]["name"], version=config["app"]["version"])
 
-# Include Agent0 & Agent1 Routes (agent1 prefix is managed in the router itself)
+# Include Agent0 & Agent1 Routes (prefixes managed explicitly in routers)
 app.include_router(agent0.router, tags=["Stock Selection"])
 app.include_router(agent1.router, tags=["Financial Analysis"])
 
