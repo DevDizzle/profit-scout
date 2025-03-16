@@ -28,9 +28,9 @@ logging.basicConfig(
 # Initialize FastAPI App
 app = FastAPI(title=config["app"]["name"], version=config["app"]["version"])
 
-# Include Agent0 & Agent1 Routes
+# Include Agent0 & Agent1 Routes (agent1 prefix is managed in the router itself)
 app.include_router(agent0.router, prefix="/agent0", tags=["Stock Selection"])
-app.include_router(agent1.router, prefix="/agent1", tags=["Financial Analysis"])
+app.include_router(agent1.router, tags=["Financial Analysis"])
 
 @app.get("/")
 async def root():
