@@ -14,6 +14,8 @@ export default function ChatUI() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
   const fetchAnalysis = async (ticker: string) => {
     setIsProcessing(true);
     setMessages((prev) => [
@@ -22,7 +24,7 @@ export default function ChatUI() {
     ]);
 
     try {
-      const response = await fetch(`http://localhost:8000/agent1/analyze_stock/${ticker}`);
+      const response = await fetch(`${backendUrl}/agent1/analyze_stock/${ticker}`);
       if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
       const data = await response.json();
 
