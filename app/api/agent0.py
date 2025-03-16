@@ -1,28 +1,35 @@
-import logging
-from fastapi import APIRouter, HTTPException
-from app.models.stock import Stock
-from app.services.bigquery_service import validate_stock
-from app.services.gemini_service import suggest_stocks
-from app.utils.logger import logger  # Import custom logger
+import sys
+import os
 
-router = APIRouter()
+# Explicitly add project root to sys.path for correct imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-@router.get("/validate_stock/{stock_query}", response_model=Stock)
-async def validate_stock_api(stock_query: str):
-    """Check if a stock exists in S&P 500 and return structured data."""
-    logger.info(f"🔍 Validating stock: {stock_query}")
-    result = validate_stock(stock_query)
+import pytest
+from httpx import AsyncClient
+from app.main import app
 
-    if result:
-        logger.info(f"✅ Stock found: {result['company_name']} ({result['ticker']})")
-        return Stock(ticker=result["ticker"], company_name=result["company_name"])
-    
-    logger.warning(f"❌ Stock not found: {stock_query}")
-    raise HTTPException(status_code=404, detail="Stock not found in S&P 500")
+@pytest.mark.asyncio
+async def test_validate_stock():
+    """Test validating a valid stock."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.get("/agent0/validate_stock/AMZN")
+    assert response.status_code == 200
+    assert response.json() == {"ticker": "AMZN", "company_name": "Amazon"}
 
-@router.get("/stock_suggestions/{user_query}")
-async def stock_suggestions_api(user_query: str):
-    """Generate stock suggestions using Gemini."""
-    logger.info(f"📡 Fetching stock suggestions for query: {user_query}")
-    suggestions = suggest_stocks(user_query)
-    return {"suggestions": suggestions}
+@pytest.mark.asyncio
+async def test_validate_invalid_stock():
+    """Test validating an invalid stock."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.get("/agent0/validate_stock/INVALID")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Stock not found in S&P 500"
+
+@pytest.mark.asyncio
+async def test_stock_suggestions():
+    """Test generating stock suggestions."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.get("/agent0/stock_suggestions/AI")
+    assert response.status_code == 200
+    suggestions = response.json().get("suggestions")
+    assert suggestions is not None
+    print("\n✅ Stock Suggestions explicitly from Gemini:", suggestions)
