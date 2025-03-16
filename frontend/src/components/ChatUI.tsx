@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { Input } from "../ui/input";
+import { Button } from "../ui/button";
 
 interface Message {
   id: number;
@@ -22,18 +22,25 @@ export default function ChatUI() {
     ]);
 
     try {
-      const response = await fetch(`/agent1/analyze_stock/${ticker}`);
+      const response = await fetch(`http://localhost:8000/agent1/analyze_stock/${ticker}`);
+      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
       const data = await response.json();
 
-      const formattedMessage = `📈 Analysis for ${data.ticker}:
-        - ROE: ${data.financial_ratios?.ROE || "N/A"}
-        - Current Ratio: ${data.financial_ratios?.Current_Ratio || "N/A"}
-        - Gross Margin: ${data.financial_ratios?.Gross_Margin || "N/A"}
-        - P/E Ratio: ${data.financial_ratios?.P_E_Ratio || "N/A"}
-        - Debt to Equity: ${data.financial_ratios?.Debt_to_Equity || "N/A"}
-        - FCF Yield: ${data.financial_ratios?.FCF_Yield || "N/A"}
+      const formattedMessage = `
+📈 **Stock Analysis for ${data.ticker}:**
 
-      📢 Conclusion: ${data.analysis}`;
+- **ROE:** ${data.financial_ratios?.ROE ? (data.financial_ratios.ROE * 100).toFixed(2) + "%" : "N/A"}
+- **Current Ratio:** ${data.financial_ratios?.Current_Ratio?.toFixed(2) || "N/A"}
+- **Gross Margin:** ${data.financial_ratios?.Gross_Margin ? (data.financial_ratios.Gross_Margin * 100).toFixed(2) + "%" : "N/A"}
+- **P/E Ratio:** ${data.financial_ratios?.P_E_Ratio?.toFixed(2) || "N/A"}
+- **Debt to Equity:** ${data.financial_ratios?.Debt_to_Equity !== null ? data.financial_ratios.Debt_to_Equity.toFixed(2) : "N/A"}
+- **FCF Yield:** ${data.financial_ratios?.FCF_Yield !== null ? data.financial_ratios.FCF_Yield.toFixed(2) : "N/A"}
+
+📢 **Recommendation: ${data.analysis.match(/\*\*Recommendation:\*\* (.*?)\n/)?.[1] || "No recommendation"}**  
+
+💡 **Summary:**  
+${data.analysis.split("**Recommendation:**")[0].trim()}
+      `;
 
       setMessages((prev) => [...prev, { id: Date.now(), text: formattedMessage, type: "bot", timestamp: new Date().toLocaleString() }]);
     } catch (error) {
