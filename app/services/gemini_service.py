@@ -4,14 +4,13 @@ import google.generativeai as genai
 from app.utils.logger import logger
 from app.models.ratios import FinancialRatios
 
-load_dotenv()  # clearly loads from .env file
+load_dotenv()  # explicitly loads from .env file
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 model = genai.GenerativeModel(
     "gemini-2.0-flash",
-    generation_config={"temperature": 0.5, "max_output_tokens": 1024},
-    tools=[{"name": "GoogleSearch"}]
+    generation_config={"temperature": 0.5, "max_output_tokens": 1024}
 )
 
 def build_analysis_prompt(ticker: str, ratios: FinancialRatios):
@@ -36,7 +35,7 @@ def build_analysis_prompt(ticker: str, ratios: FinancialRatios):
             prompt += f"- {name.replace('_', ' ')}\n"
 
     prompt += (
-        "\nUsing the available information and real-time data from Google search, provide a concise financial "
+        "\nUsing the available information, provide a concise financial "
         "analysis and conclude with a clear BUY, HOLD, or SELL recommendation. "
         "If the data is insufficient for a definitive recommendation, clearly state that."
     )
@@ -45,7 +44,7 @@ def build_analysis_prompt(ticker: str, ratios: FinancialRatios):
 
 
 def suggest_stocks(user_query: str):
-    """Generate stock suggestions using Gemini AI with real-time grounding."""
+    """Generate stock suggestions using Gemini AI."""
     logger.info(f"📡 Sending stock suggestion request to Gemini: {user_query}")
 
     prompt = f"""
@@ -57,10 +56,7 @@ def suggest_stocks(user_query: str):
     """
 
     try:
-        response = model.generate_content(
-            prompt,
-            tools=[{"name": "GoogleSearch"}]
-        )
+        response = model.generate_content(prompt)
         result = response.text.strip() if response.text else "No response from Gemini"
         logger.info("✅ Gemini stock suggestions received successfully")
         return result
@@ -70,16 +66,13 @@ def suggest_stocks(user_query: str):
 
 
 def analyze_stock(ticker: str, ratios: FinancialRatios):
-    """Analyze stock using financial ratios and real-time grounding."""
+    """Analyze stock using financial ratios."""
     logger.info(f"📡 Sending financial analysis request to Gemini for {ticker}")
 
     prompt = build_analysis_prompt(ticker, ratios)
 
     try:
-        response = model.generate_content(
-            prompt,
-            tools=[{"name": "GoogleSearch"}]
-        )
+        response = model.generate_content(prompt)
         result = response.text.strip() if response.text else "No response from Gemini"
         logger.info(f"✅ Gemini stock analysis received successfully for {ticker}")
         return result
