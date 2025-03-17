@@ -32,9 +32,9 @@ from google.oauth2 import service_account
 SLEEP_TIME = (1, 3)
 SEC_HEADERS = {
     "User-Agent": "ProfitScout (eraphaelparra@gmail.com)",
-    "Accept-Encoding": "gzip, deflate",
-    "Host": "www.sec.gov"
+    "Accept-Encoding": "gzip, deflate"
 }
+
 
 logging.basicConfig(
     level=logging.INFO,
