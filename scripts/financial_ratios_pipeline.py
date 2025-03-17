@@ -331,7 +331,8 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
             "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
         ],
         "CapEx": [
-            "PaymentsToAcquirePropertyPlantEquipment",
+            "PaymentsToAcquirePropertyPlantAndEquipment",            # corrected key with "And"
+            "CapitalExpendituresIncurredButNotYetPaid",                # added key from your findings
             "CapitalExpenditures",
             "CapitalExpenditure",
             "PurchaseOfPropertyPlantAndEquipment",
