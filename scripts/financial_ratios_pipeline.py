@@ -23,7 +23,7 @@ SLEEP_TIME = (3, 6)       # random sleep for market data
 MAX_DAYS_FORWARD = 5      # how many days forward we check from the 'end' date
 
 # Set this variable to test a single ticker (AMZN)
-TEST_TICKER = "APPL"
+TEST_TICKER = "AAPL"
 
 logger = logging.getLogger('financial_pipeline')
 logger.setLevel(logging.INFO)
