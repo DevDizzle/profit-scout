@@ -391,54 +391,77 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     print("DEBUG: Pivoted DataFrame after converting date and numeric columns:")
     print(pivoted.head())
 
-    # Enhanced standard mapping using additional synonyms from fact_key
-    standard_map = {
-        "Net Income": [
-            "NetIncomeLoss",
-            "NetIncomeFromContinuingOperations",
-            "NetIncomeApplicableToCommonStockholders"
-        ],
-        "Total Equity": [
-            "StockholdersEquity",
-            "StockholdersEquityAttributableToParent",
-            "TotalStockholdersEquity"
-        ],
-        "Total Debt": [
-            "Liabilities",
-            "LongTermDebt",
-            "ShortTermDebt",
-            "DebtAndCapitalLeaseObligations"
-        ],
-        "Current Assets": [
-            "AssetsCurrent",
-            "CurrentAssets"
-        ],
-        "Current Liabilities": [
-            "LiabilitiesCurrent",
-            "CurrentLiabilities"
-        ],
-        "Revenues": [
-            "Revenues",
-            "SalesRevenueNet",
-            "RevenuesNetOfInterestExpense"
-        ],
-        "Cost of Goods Sold": [
-            "CostOfGoodsSold",
-            "CostOfRevenue"
-        ],
-        "Earnings Per Share": [
-            "EarningsPerShareBasic",
-            "EarningsPerShareDiluted"
-        ],
-        "Operating Cash Flow": [
-            "NetCashProvidedByUsedInOperatingActivities",
-            "OperatingCashFlow"
-        ],
-        "CapEx": [
-            "PaymentsToAcquirePropertyPlantEquipment",
-            "CapitalExpenditures"
-        ]
-    }
+standard_map = {
+    # For ROE: Net Income / Total Equity
+    "Net Income": [
+        "NetIncomeLoss",
+        "NetIncomeFromContinuingOperations",
+        "NetIncomeApplicableToCommonStockholders",
+        "NetIncome"
+    ],
+    "Total Equity": [
+        "StockholdersEquity",
+        "StockholdersEquityAttributableToParent",
+        "TotalStockholdersEquity",
+        "ShareholdersEquity",
+        "CommonStockholdersEquity"
+    ],
+    
+    # For Debt-to-Equity: Total Debt / Total Equity
+    "Total Debt": [
+        "LongTermDebt",
+        "ShortTermDebt",
+        "DebtAndCapitalLeaseObligations",
+        "TotalDebt"
+    ],
+    
+    # For Current Ratio: Current Assets / Current Liabilities
+    "Current Assets": [
+        "AssetsCurrent",
+        "CurrentAssets"
+    ],
+    "Current Liabilities": [
+        "LiabilitiesCurrent",
+        "CurrentLiabilities"
+    ],
+    
+    # For Gross Margin: (Revenues - Cost of Goods Sold) / Revenues
+    "Revenues": [
+        "Revenues",
+        "SalesRevenueNet",
+        "RevenuesNetOfInterestExpense",
+        "TotalRevenue",
+        "Revenue",
+        "RevenueFromContractWithCustomerExcludingAssessedTax"  # if applicable
+    ],
+    "Cost of Goods Sold": [
+        "CostOfGoodsSold",
+        "CostOfRevenue",
+        "CostOfGoodsAndServicesSold"
+    ],
+    
+    # For P/E Ratio: Market Price / Earnings Per Share
+    "Earnings Per Share": [
+        "EarningsPerShareBasic",
+        "EarningsPerShareDiluted",
+        "EarningsPerShare",
+        "BasicEarningsPerShare",
+        "DilutedEarningsPerShare"
+    ],
+    
+    # For FCF Yield: (Operating Cash Flow - CapEx) / Market Cap
+    "Operating Cash Flow": [
+        "NetCashProvidedByUsedInOperatingActivities",
+        "OperatingCashFlow",
+        "CashFlowFromOperations"
+    ],
+    "CapEx": [
+        "PaymentsToAcquirePropertyPlantEquipment",
+        "CapitalExpenditures",
+        "CapitalExpenditure",
+        "PurchaseOfPropertyPlantAndEquipment"
+    ]
+}
 
 
     # Map the synonyms to standardized columns.
