@@ -337,15 +337,23 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     sec_df['segment'] = sec_df['segment'].fillna('UnknownSegment')
 
     pivot_cols = ['ticker', 'company_name', 'industry_name', 'segment', 'end']
-    # Use the new fact_key and value columns instead of the old item/val columns.
+    # Ensure the 'value' column is numeric
+    sec_df['value'] = pd.to_numeric(sec_df['value'], errors='coerce')
+
     df_sec = sec_df[pivot_cols + ['fact_key', 'value']].copy().dropna(subset=['ticker', 'end', 'fact_key'])
 
+    # Pivot the table so each fact_key becomes its own column.
     pivoted = df_sec.pivot_table(
         index=pivot_cols,
         columns='fact_key',
         values='value',
         aggfunc='max'
     ).reset_index()
+
+    # Convert all columns (except pivot grouping columns) to numeric if possible.
+    pivoted_numeric_cols = [col for col in pivoted.columns if col not in pivot_cols and col != 'as_of_date']
+    for col in pivoted_numeric_cols:
+        pivoted[col] = pd.to_numeric(pivoted[col], errors='coerce')
 
     pivoted['as_of_date'] = pivoted['end'].dt.date.astype(str)
 
@@ -405,6 +413,8 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
             pivoted[std_item] = pivoted[found_cols].bfill(axis=1).iloc[:, 0]
         else:
             pivoted[std_item] = np.nan
+        # Ensure the standardized column is numeric.
+        pivoted[std_item] = pd.to_numeric(pivoted[std_item], errors='coerce')
 
     logger.info(f"Merging pivoted SEC data (shape={pivoted.shape}) with market data (shape={market_df.shape})")
     merged = pd.merge(
@@ -418,7 +428,7 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         logger.warning("Final merge returned an empty DataFrame. No matching (ticker, as_of_date).")
         return pd.DataFrame()
 
-    # Calculate ratios
+    # Calculate ratios using the now numeric standardized columns.
     merged['ROE'] = merged['Net Income'] / merged['Total Equity']
     merged['Debt_to_Equity'] = merged['Total Debt'] / merged['Total Equity']
     merged['Current_Ratio'] = merged['Current Assets'] / merged['Current Liabilities']
@@ -449,7 +459,6 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     final_df = merged[final_cols].drop_duplicates()
     logger.info(f"Final DataFrame shape: {final_df.shape}")
     return final_df
-
 # =============================================================================
 #                                 MAIN
 # =============================================================================
