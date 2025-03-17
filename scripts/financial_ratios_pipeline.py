@@ -22,6 +22,9 @@ import yfinance as yf
 SLEEP_TIME = (3, 6)       # random sleep for market data
 MAX_DAYS_FORWARD = 5      # how many days forward we check from the 'end' date
 
+# Set this variable to test a single ticker (AMZN)
+TEST_TICKER = "AMZN"
+
 logger = logging.getLogger('financial_pipeline')
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
@@ -50,6 +53,7 @@ def load_cik_mapping(metadata_csv: str) -> dict:
     cik_map = {str(row['ticker']).upper(): str(row['cik']).zfill(10)
                for _, row in df.iterrows()}
     logger.info(f"Loaded CIK mapping for {len(cik_map)} tickers.")
+    print(f"DEBUG: CIK mapping loaded for {len(cik_map)} tickers.")
     return cik_map
 
 def _submission_url(cik: str) -> str:
@@ -69,6 +73,7 @@ def get_submission_data_for_ticker(ticker: str) -> pd.DataFrame:
         raise ValueError(f"No CIK for ticker {ticker}")
 
     url = _submission_url(cik)
+    print(f"DEBUG: Fetching submission data for {ticker} from {url}")
     resp = requests.get(url, headers=SEC_HEADERS)
     resp.raise_for_status()
     data = resp.json().get("filings", {}).get("recent", {})
@@ -84,10 +89,12 @@ def get_latest_filing_info(ticker: str):
         relevant = df[df['form'].isin(['10-K', '10-Q'])].copy()
         if relevant.empty:
             logger.warning(f"No 10-K or 10-Q for {ticker}")
+            print(f"DEBUG: No 10-K or 10-Q filings found for {ticker}")
             return None, None, None
 
         relevant['filingDate'] = pd.to_datetime(relevant['filingDate'], errors='coerce')
         recent = relevant.sort_values('filingDate', ascending=False).iloc[0]
+        print(f"DEBUG: Latest filing for {ticker}: {recent['form']} on {recent['filingDate']}")
         return recent['accessionNumber'], recent['form'], recent['filingDate']
     except Exception as exc:
         logger.error(f"Error fetching filing info for {ticker}: {exc}")
@@ -103,6 +110,7 @@ def get_facts_json(ticker: str) -> dict:
         raise ValueError(f"No CIK for ticker {ticker}")
 
     url = _facts_url(cik)
+    print(f"DEBUG: Fetching facts JSON for {ticker} from {url}")
     resp = requests.get(url, headers=SEC_HEADERS)
     resp.raise_for_status()
     return resp.json()
@@ -110,13 +118,14 @@ def get_facts_json(ticker: str) -> dict:
 def facts_to_df(facts_json: dict) -> pd.DataFrame:
     """
     Convert 'us-gaap' portion of XBRL facts into a Pandas DataFrame.
-    In this updated version we extract the fact key (as 'fact_key') and the reported value (as 'value')
+    Extract the fact key (as 'fact_key') and the reported value (as 'value')
     along with other metadata.
     """
     rows = []
     gaap_facts = facts_json.get('facts', {}).get('us-gaap', {})
     if not gaap_facts:
         logger.warning("No us-gaap facts found.")
+        print("DEBUG: No us-gaap facts found in JSON.")
         return pd.DataFrame()
 
     for fact_key, fact_val in gaap_facts.items():
@@ -136,7 +145,9 @@ def facts_to_df(facts_json: dict) -> pd.DataFrame:
                     'filed': entry.get('filed')
                 })
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    print(f"DEBUG: Created facts DataFrame with shape {df.shape}")
+    return df
 
 def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
     """
@@ -160,10 +171,12 @@ def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
         df_facts = df_facts[df_facts['end'] <= today]
         if df_facts.empty:
             logger.info(f"{ticker}: All 'end' dates are in the future, skipping.")
+            print(f"DEBUG: All 'end' dates for {ticker} are in the future.")
             return pd.DataFrame()
 
         last_date = df_facts['end'].max()
         recent = df_facts[df_facts['end'] == last_date].copy()
+        print(f"DEBUG: Latest 'end' date for {ticker} is {last_date}")
 
         recent['accn'] = accession
         recent['form'] = form_type
@@ -176,7 +189,7 @@ def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
 def load_all_financial_metrics(metadata_csv: str) -> pd.DataFrame:
     """
     1) Load metadata.
-    2) Loop over ALL tickers.
+    2) Process only the TEST_TICKER.
     3) Fetch last-filed facts.
     4) Return combined DataFrame.
     """
@@ -184,20 +197,23 @@ def load_all_financial_metrics(metadata_csv: str) -> pd.DataFrame:
     CIK_MAPPING = load_cik_mapping(metadata_csv)
 
     meta_df = pd.read_csv(metadata_csv)
+    # Filter metadata to only the test ticker (AMZN)
+    meta_df = meta_df[meta_df['ticker'].str.upper() == TEST_TICKER]
     tickers = meta_df['ticker'].str.upper().unique().tolist()
-    logger.info(f"Fetching SEC metrics for {len(tickers)} tickers...")
+    logger.info(f"Fetching SEC metrics for {len(tickers)} ticker: {tickers}")
+    print(f"DEBUG: Processing tickers: {tickers}")
 
     all_frames = []
     for i, ticker in enumerate(tickers, 1):
-        logger.info(f"[{i}/{len(tickers)}] Processing ticker: {ticker}")
+        print(f"DEBUG: Processing ticker {ticker} ({i}/{len(tickers)})")
         try:
             df_facts = get_latest_filing_facts(ticker)
             if df_facts.empty:
                 logger.info(f"No valid facts found for {ticker}. Skipping.")
+                print(f"DEBUG: No valid facts found for {ticker}")
                 continue
 
-            logger.info(f"  => Fetched {len(df_facts)} fact rows for {ticker}")
-
+            print(f"DEBUG: Retrieved {len(df_facts)} fact rows for {ticker}")
             df_facts['ticker'] = ticker
             # Attach metadata columns
             row = meta_df[meta_df['ticker'].str.upper() == ticker].iloc[0]
@@ -208,11 +224,15 @@ def load_all_financial_metrics(metadata_csv: str) -> pd.DataFrame:
             all_frames.append(df_facts)
         except Exception as e:
             logger.error(f"Error for ticker {ticker}: {e}")
+            print(f"DEBUG: Error processing ticker {ticker}: {e}")
 
     if not all_frames:
         logger.info("No data frames were collected from SEC for any ticker.")
+        print("DEBUG: No SEC data collected.")
         return pd.DataFrame()
-    return pd.concat(all_frames, ignore_index=True)
+    result = pd.concat(all_frames, ignore_index=True)
+    print(f"DEBUG: Combined SEC DataFrame shape: {result.shape}")
+    return result
 
 # =============================================================================
 #                     PIPELINE: FETCH MARKET DATA (SERIAL)
@@ -221,8 +241,8 @@ def load_all_financial_metrics(metadata_csv: str) -> pd.DataFrame:
 def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) -> dict:
     """
     For the given 'reported_date' (the last reported 'end' from SEC),
-    we try up to MAX_DAYS_FORWARD to find the first trading day with data.
-    Return a *single dict* with:
+    try up to MAX_DAYS_FORWARD to find the first trading day with data.
+    Return a dict with:
       [ticker, as_of_date, actual_market_date, market_price, market_cap, dividend].
     """
     if pd.isna(reported_date):
@@ -231,16 +251,16 @@ def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) ->
     base_date = reported_date.date() if hasattr(reported_date, 'date') else reported_date
 
     for offset in range(MAX_DAYS_FORWARD + 1):
-        try_date = base_date + timedelta(days=offset)
-        # Skip weekends quickly
-        if try_date.weekday() >= 5:
-            continue
-
-        # Polite, random sleep
-        time.sleep(random.uniform(*SLEEP_TIME))
-
-        stock = yf.Ticker(ticker)
         try:
+            try_date = base_date + timedelta(days=offset)
+            # Skip weekends quickly
+            if try_date.weekday() >= 5:
+                continue
+
+            # Polite, random sleep
+            time.sleep(random.uniform(*SLEEP_TIME))
+
+            stock = yf.Ticker(ticker)
             hist = stock.history(start=try_date, end=try_date + timedelta(days=1), interval='1d')
             if hist.empty:
                 continue
@@ -267,6 +287,7 @@ def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) ->
 
             dividend = info.get('dividendRate', 0.0)
 
+            print(f"DEBUG: Market data for {ticker} on {try_date}: Price={close_price}, Market Cap={market_cap}, Dividend={dividend}")
             return {
                 'ticker': ticker,
                 'as_of_date': str(base_date),  # The original 'end' date
@@ -277,13 +298,14 @@ def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) ->
             }
         except Exception as exc:
             logger.error(f"Error fetching Yahoo data for {ticker} on {try_date}: {exc}")
+            print(f"DEBUG: Error fetching market data for {ticker} on {try_date}: {exc}")
             continue
 
     return {}
 
 def fetch_market_data(sec_df: pd.DataFrame) -> pd.DataFrame:
     """
-    SERIAL approach: For each unique (ticker, end) pair, fetch exactly one row of market data.
+    For each unique (ticker, end) pair in sec_df, fetch one row of market data.
     """
     needed = sec_df[['ticker', 'end']].drop_duplicates()
     needed = needed.dropna(subset=['ticker', 'end'])
@@ -291,13 +313,14 @@ def fetch_market_data(sec_df: pd.DataFrame) -> pd.DataFrame:
     results = []
     total = len(needed)
     logger.info(f"Fetching market data for {total} (ticker, end) pairs (SERIAL).")
+    print(f"DEBUG: There are {total} (ticker, end) pairs to process for market data.")
     count = 0
 
     for _, row in needed.iterrows():
         count += 1
         ticker = row['ticker']
         end_date = row['end']
-        logger.info(f"[{count}/{total}] Fetching market data for {ticker} (end={end_date.date()})...")
+        print(f"DEBUG: Fetching market data for {ticker} with end date {end_date}")
         data_dict = fetch_single_ticker_market_data(ticker, end_date)
         if data_dict:
             logger.info(f"  => Found market data on date={data_dict['actual_market_date']} price={data_dict['market_price']}")
@@ -307,8 +330,11 @@ def fetch_market_data(sec_df: pd.DataFrame) -> pd.DataFrame:
 
     if not results:
         logger.warning("No market data results at all!")
+        print("DEBUG: No market data results.")
         return pd.DataFrame()
-    return pd.DataFrame(results)
+    df_market = pd.DataFrame(results)
+    print(f"DEBUG: Combined market data DataFrame shape: {df_market.shape}")
+    return df_market
 
 # =============================================================================
 #                     PIPELINE: CALCULATE RATIOS & FINAL OUTPUT
@@ -319,17 +345,20 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     1) Pivot SEC data on (ticker, company_name, industry_name, segment, end).
     2) Merge with market_df on (ticker, as_of_date).
     3) Calculate ratios.
-    4) Return final DataFrame with extra columns: industry_name, segment, etc.
+    4) Return final DataFrame with extra columns.
     """
     if sec_df.empty:
         logger.warning("SEC DataFrame is empty! No ratios to compute.")
+        print("DEBUG: SEC DataFrame is empty.")
         return pd.DataFrame()
 
     if market_df.empty:
         logger.warning("Market DataFrame is empty! No ratios to compute.")
+        print("DEBUG: Market DataFrame is empty.")
         return pd.DataFrame()
 
     logger.info("Pivoting SEC data to compute ratios...")
+    print("DEBUG: Starting pivot operation on SEC data.")
 
     # Fill missing grouping columns so pivot_table won't drop rows
     sec_df['company_name'] = sec_df['company_name'].fillna('UnknownCompany')
@@ -341,6 +370,7 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     sec_df['value'] = pd.to_numeric(sec_df['value'], errors='coerce')
 
     df_sec = sec_df[pivot_cols + ['fact_key', 'value']].copy().dropna(subset=['ticker', 'end', 'fact_key'])
+    print(f"DEBUG: Data for pivoting has shape {df_sec.shape}")
 
     # Pivot the table so each fact_key becomes its own column.
     pivoted = df_sec.pivot_table(
@@ -349,13 +379,17 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         values='value',
         aggfunc='max'
     ).reset_index()
+    print("DEBUG: Pivoted DataFrame head:")
+    print(pivoted.head())
 
-    # Convert all columns (except pivot grouping columns) to numeric if possible.
+    # Convert pivoted columns to numeric if possible.
     pivoted_numeric_cols = [col for col in pivoted.columns if col not in pivot_cols and col != 'as_of_date']
     for col in pivoted_numeric_cols:
         pivoted[col] = pd.to_numeric(pivoted[col], errors='coerce')
 
     pivoted['as_of_date'] = pivoted['end'].dt.date.astype(str)
+    print("DEBUG: Pivoted DataFrame after converting date and numeric columns:")
+    print(pivoted.head())
 
     # Enhanced standard mapping using additional synonyms from fact_key
     standard_map = {
@@ -411,10 +445,14 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         found_cols = [col for col in synonyms if col in pivoted.columns]
         if found_cols:
             pivoted[std_item] = pivoted[found_cols].bfill(axis=1).iloc[:, 0]
+            print(f"DEBUG: Mapped {std_item} using columns: {found_cols}")
         else:
             pivoted[std_item] = np.nan
-        # Ensure the standardized column is numeric.
+            print(f"DEBUG: Could not map {std_item}; set as NaN")
         pivoted[std_item] = pd.to_numeric(pivoted[std_item], errors='coerce')
+
+    print("DEBUG: Pivoted DataFrame with standardized columns:")
+    print(pivoted[[col for col in pivoted.columns if col in standard_map.keys()]].head())
 
     logger.info(f"Merging pivoted SEC data (shape={pivoted.shape}) with market data (shape={market_df.shape})")
     merged = pd.merge(
@@ -423,22 +461,31 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         how='left',
         on=['ticker', 'as_of_date']
     )
+    print("DEBUG: Merged DataFrame head:")
+    print(merged.head())
 
     if merged.empty:
         logger.warning("Final merge returned an empty DataFrame. No matching (ticker, as_of_date).")
+        print("DEBUG: Merged DataFrame is empty.")
         return pd.DataFrame()
 
     # Calculate ratios using the now numeric standardized columns.
-    merged['ROE'] = merged['Net Income'] / merged['Total Equity']
-    merged['Debt_to_Equity'] = merged['Total Debt'] / merged['Total Equity']
-    merged['Current_Ratio'] = merged['Current Assets'] / merged['Current Liabilities']
-    merged['Gross_Margin'] = (
-        (merged['Revenues'] - merged.get('Cost of Goods Sold', 0.0))
-        / merged['Revenues']
-    )
-    merged['Free_Cash_Flow'] = merged['Operating Cash Flow'] - merged.get('CapEx', 0.0)
-    merged['P_E_Ratio'] = merged['market_price'] / merged['Earnings Per Share']
-    merged['FCF_Yield'] = merged['Free_Cash_Flow'] / merged['market_cap']
+    try:
+        merged['ROE'] = merged['Net Income'] / merged['Total Equity']
+        merged['Debt_to_Equity'] = merged['Total Debt'] / merged['Total Equity']
+        merged['Current_Ratio'] = merged['Current Assets'] / merged['Current Liabilities']
+        merged['Gross_Margin'] = (
+            (merged['Revenues'] - merged.get('Cost of Goods Sold', 0.0))
+            / merged['Revenues']
+        )
+        merged['Free_Cash_Flow'] = merged['Operating Cash Flow'] - merged.get('CapEx', 0.0)
+        merged['P_E_Ratio'] = merged['market_price'] / merged['Earnings Per Share']
+        merged['FCF_Yield'] = merged['Free_Cash_Flow'] / merged['market_cap']
+    except Exception as e:
+        print(f"DEBUG: Error calculating ratios: {e}")
+
+    print("DEBUG: Ratios calculated:")
+    print(merged[['ROE', 'Debt_to_Equity', 'Current_Ratio', 'Gross_Margin', 'P_E_Ratio', 'FCF_Yield']].head())
 
     final_cols = [
         'ticker',
@@ -457,8 +504,9 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         'FCF_Yield'
     ]
     final_df = merged[final_cols].drop_duplicates()
-    logger.info(f"Final DataFrame shape: {final_df.shape}")
+    print(f"DEBUG: Final DataFrame shape: {final_df.shape}")
     return final_df
+
 # =============================================================================
 #                                 MAIN
 # =============================================================================
@@ -468,7 +516,7 @@ def main(event=None, context=None):
     Complete pipeline:
       1. Load GCP credentials.
       2. Read metadata.
-      3. Fetch SEC data (ALL tickers).
+      3. Fetch SEC data (for TEST_TICKER only).
       4. Fetch Yahoo market data (serial).
       5. Calculate ratios.
       6. Upload final table to BigQuery.
@@ -480,30 +528,40 @@ def main(event=None, context=None):
     )
     client = bigquery.Client(project='aialchemy', credentials=credentials)
     logger.info(f"Using credentials from {key_path}")
+    print("DEBUG: Credentials loaded.")
 
     # 2) Metadata CSV
     metadata_csv_path = "/home/eraphaelparra/profit-scout/data/sp500_metadata.csv"
 
-    # 3) Fetch SEC data (for all tickers in CSV)
+    # 3) Fetch SEC data (for TEST_TICKER only)
     sec_df = load_all_financial_metrics(metadata_csv_path)
     if sec_df.empty:
         logger.error("No SEC data returned. Exiting.")
+        print("DEBUG: SEC DataFrame is empty. Exiting.")
         return
     logger.info(f"SEC DataFrame shape: {sec_df.shape}")
+    print("DEBUG: SEC DataFrame head:")
+    print(sec_df.head())
 
     # 4) Fetch market data
     market_df = fetch_market_data(sec_df)
     if market_df.empty:
         logger.error("No market data fetched. Exiting.")
+        print("DEBUG: Market DataFrame is empty. Exiting.")
         return
     logger.info(f"Market DataFrame shape: {market_df.shape}")
+    print("DEBUG: Market DataFrame head:")
+    print(market_df.head())
 
     # 5) Calculate ratios
     final_df = calculate_ratios(sec_df, market_df)
     if final_df.empty:
         logger.warning("Final DataFrame is empty; nothing to upload. Exiting.")
+        print("DEBUG: Final DataFrame is empty. Exiting.")
         return
     logger.info(f"Final table shape: {final_df.shape}")
+    print("DEBUG: Final DataFrame head:")
+    print(final_df.head())
 
     # 6) Upload final table to BigQuery (table name updated to "financial_ratios")
     table_id = "aialchemy.financial_data.financial_ratios"
@@ -516,6 +574,7 @@ def main(event=None, context=None):
         credentials=credentials
     )
     logger.info(f"Uploaded final table with {len(final_df)} rows to {table_id}. Pipeline complete.")
+    print("DEBUG: Pipeline complete.")
 
 if __name__ == "__main__":
     main()
