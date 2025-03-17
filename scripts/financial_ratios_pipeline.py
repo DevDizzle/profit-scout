@@ -36,21 +36,12 @@ SEC_HEADERS = {
     "Host": "data.sec.gov"
 }
 
-CIK_MAPPING = {}  # global ticker -> padded CIK
+# Global ticker -> padded CIK mapping. For AAPL, the CIK is 0000320193.
+CIK_MAPPING = {"AAPL": "0000320193"}
 
 # =============================================================================
 #                     HELPER FUNCTIONS (SEC + METADATA)
 # =============================================================================
-
-def load_cik_mapping(metadata_csv: str) -> dict:
-    """
-    Read ticker->CIK from CSV, zero-pad the CIK to 10 digits.
-    """
-    df = pd.read_csv(metadata_csv)
-    cik_map = {str(row['ticker']).upper(): str(row['cik']).zfill(10)
-               for _, row in df.iterrows()}
-    logger.info(f"Loaded CIK mapping for {len(cik_map)} tickers.")
-    return cik_map
 
 def _submission_url(cik: str) -> str:
     return f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json"
@@ -110,7 +101,7 @@ def get_facts_json(ticker: str) -> dict:
 def facts_to_df(facts_json: dict) -> pd.DataFrame:
     """
     Convert 'us-gaap' portion of XBRL facts into a Pandas DataFrame.
-    In this updated version we extract the fact key (as 'fact_key') and the reported value (as 'value')
+    Extracts the fact key (as 'fact_key') and the reported value (as 'value')
     along with other metadata.
     """
     rows = []
@@ -173,47 +164,6 @@ def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
         logger.error(f"Error fetching facts for {ticker}: {exc}")
         return pd.DataFrame()
 
-def load_all_financial_metrics(metadata_csv: str) -> pd.DataFrame:
-    """
-    1) Load metadata.
-    2) Loop over ALL tickers.
-    3) Fetch last-filed facts.
-    4) Return combined DataFrame.
-    """
-    global CIK_MAPPING
-    CIK_MAPPING = load_cik_mapping(metadata_csv)
-
-    meta_df = pd.read_csv(metadata_csv)
-    tickers = meta_df['ticker'].str.upper().unique().tolist()
-    logger.info(f"Fetching SEC metrics for {len(tickers)} tickers...")
-
-    all_frames = []
-    for i, ticker in enumerate(tickers, 1):
-        logger.info(f"[{i}/{len(tickers)}] Processing ticker: {ticker}")
-        try:
-            df_facts = get_latest_filing_facts(ticker)
-            if df_facts.empty:
-                logger.info(f"No valid facts found for {ticker}. Skipping.")
-                continue
-
-            logger.info(f"  => Fetched {len(df_facts)} fact rows for {ticker}")
-
-            df_facts['ticker'] = ticker
-            # Attach metadata columns
-            row = meta_df[meta_df['ticker'].str.upper() == ticker].iloc[0]
-            df_facts['company_name'] = row.get('company_name', pd.NA)
-            df_facts['industry_name'] = row.get('industry_name', pd.NA)
-            df_facts['segment'] = row.get('segment', pd.NA)
-
-            all_frames.append(df_facts)
-        except Exception as e:
-            logger.error(f"Error for ticker {ticker}: {e}")
-
-    if not all_frames:
-        logger.info("No data frames were collected from SEC for any ticker.")
-        return pd.DataFrame()
-    return pd.concat(all_frames, ignore_index=True)
-
 # =============================================================================
 #                     PIPELINE: FETCH MARKET DATA (SERIAL)
 # =============================================================================
@@ -222,7 +172,7 @@ def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) ->
     """
     For the given 'reported_date' (the last reported 'end' from SEC),
     we try up to MAX_DAYS_FORWARD to find the first trading day with data.
-    Return a *single dict* with:
+    Return a single dict with:
       [ticker, as_of_date, actual_market_date, market_price, market_cap, dividend].
     """
     if pd.isna(reported_date):
@@ -281,35 +231,6 @@ def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) ->
 
     return {}
 
-def fetch_market_data(sec_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    SERIAL approach: For each unique (ticker, end) pair, fetch exactly one row of market data.
-    """
-    needed = sec_df[['ticker', 'end']].drop_duplicates()
-    needed = needed.dropna(subset=['ticker', 'end'])
-
-    results = []
-    total = len(needed)
-    logger.info(f"Fetching market data for {total} (ticker, end) pairs (SERIAL).")
-    count = 0
-
-    for _, row in needed.iterrows():
-        count += 1
-        ticker = row['ticker']
-        end_date = row['end']
-        logger.info(f"[{count}/{total}] Fetching market data for {ticker} (end={end_date.date()})...")
-        data_dict = fetch_single_ticker_market_data(ticker, end_date)
-        if data_dict:
-            logger.info(f"  => Found market data on date={data_dict['actual_market_date']} price={data_dict['market_price']}")
-            results.append(data_dict)
-        else:
-            logger.info(f"  => No market data found for {ticker} near {end_date.date()}")
-
-    if not results:
-        logger.warning("No market data results at all!")
-        return pd.DataFrame()
-    return pd.DataFrame(results)
-
 # =============================================================================
 #                     PIPELINE: CALCULATE RATIOS & FINAL OUTPUT
 # =============================================================================
@@ -319,7 +240,7 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     1) Pivot SEC data on (ticker, company_name, industry_name, segment, end).
     2) Merge with market_df on (ticker, as_of_date).
     3) Calculate ratios.
-    4) Return final with extra columns: industry_name, segment, etc.
+    4) Return final DataFrame with extra columns: industry_name, segment, etc.
     """
     if sec_df.empty:
         logger.warning("SEC DataFrame is empty! No ratios to compute.")
@@ -337,7 +258,6 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     sec_df['segment'] = sec_df['segment'].fillna('UnknownSegment')
 
     pivot_cols = ['ticker', 'company_name', 'industry_name', 'segment', 'end']
-    # Use the new fact key and value columns instead of the old item/val columns.
     df_sec = sec_df[pivot_cols + ['fact_key', 'value']].copy().dropna(subset=['ticker', 'end', 'fact_key'])
 
     pivoted = df_sec.pivot_table(
@@ -350,76 +270,75 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     pivoted['as_of_date'] = pivoted['end'].dt.date.astype(str)
 
     standard_map = {
-    # For ROE: Net Income / Total Equity
-    "Net Income": [
-        "NetIncomeLoss",
-        "NetIncomeFromContinuingOperations",
-        "NetIncomeApplicableToCommonStockholders",
-        "NetIncome"
-    ],
-    "Total Equity": [
-        "StockholdersEquity",
-        "StockholdersEquityAttributableToParent",
-        "TotalStockholdersEquity",
-        "ShareholdersEquity",
-        "CommonStockholdersEquity"
-    ],
-    # For Debt-to-Equity: Total Debt / Total Equity
-    "Total Debt": [
-        "LongTermDebt",
-        "ShortTermDebt",
-        "DebtAndCapitalLeaseObligations",
-        "TotalDebt"
-    ],
-    # For Current Ratio: Current Assets / Current Liabilities
-    "Current Assets": [
-        "AssetsCurrent",
-        "CurrentAssets"
-    ],
-    "Current Liabilities": [
-        "LiabilitiesCurrent",
-        "CurrentLiabilities"
-    ],
-    # For Gross Margin: (Revenues - Cost of Goods Sold) / Revenues
-    "Revenues": [
-        "Revenues",
-        "SalesRevenueNet",
-        "RevenuesNetOfInterestExpense",
-        "TotalRevenue",
-        "Revenue",
-        "RevenueFromContractWithCustomerExcludingAssessedTax"
-    ],
-    "Cost of Goods Sold": [
-        "CostOfGoodsSold",
-        "CostOfRevenue",
-        "CostOfGoodsAndServicesSold"
-    ],
-    # For P/E Ratio: Market Price / Earnings Per Share
-    "Earnings Per Share": [
-        "EarningsPerShareBasic",
-        "EarningsPerShareDiluted",
-        "EarningsPerShare",
-        "BasicEarningsPerShare",
-        "DilutedEarningsPerShare"
-    ],
-    # For FCF Yield: (Operating Cash Flow - CapEx) / Market Cap
-    "Operating Cash Flow": [
-        "NetCashProvidedByUsedInOperatingActivities",
-        "OperatingCashFlow",
-        "CashFlowFromOperations",
-        "NetCashFromOperatingActivities",
-        "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
-    ],
-    "CapEx": [
-        "PaymentsToAcquirePropertyPlantEquipment",
-        "CapitalExpenditures",
-        "CapitalExpenditure",
-        "PurchaseOfPropertyPlantAndEquipment",
-        "InvestingCashFlowCapitalExpenditures",
-        "AcquisitionsNet"
-    ]
-}
-
+        # For ROE: Net Income / Total Equity
+        "Net Income": [
+            "NetIncomeLoss",
+            "NetIncomeFromContinuingOperations",
+            "NetIncomeApplicableToCommonStockholders",
+            "NetIncome"
+        ],
+        "Total Equity": [
+            "StockholdersEquity",
+            "StockholdersEquityAttributableToParent",
+            "TotalStockholdersEquity",
+            "ShareholdersEquity",
+            "CommonStockholdersEquity"
+        ],
+        # For Debt-to-Equity: Total Debt / Total Equity
+        "Total Debt": [
+            "LongTermDebt",
+            "ShortTermDebt",
+            "DebtAndCapitalLeaseObligations",
+            "TotalDebt"
+        ],
+        # For Current Ratio: Current Assets / Current Liabilities
+        "Current Assets": [
+            "AssetsCurrent",
+            "CurrentAssets"
+        ],
+        "Current Liabilities": [
+            "LiabilitiesCurrent",
+            "CurrentLiabilities"
+        ],
+        # For Gross Margin: (Revenues - Cost of Goods Sold) / Revenues
+        "Revenues": [
+            "Revenues",
+            "SalesRevenueNet",
+            "RevenuesNetOfInterestExpense",
+            "TotalRevenue",
+            "Revenue",
+            "RevenueFromContractWithCustomerExcludingAssessedTax"
+        ],
+        "Cost of Goods Sold": [
+            "CostOfGoodsSold",
+            "CostOfRevenue",
+            "CostOfGoodsAndServicesSold"
+        ],
+        # For P/E Ratio: Market Price / Earnings Per Share
+        "Earnings Per Share": [
+            "EarningsPerShareBasic",
+            "EarningsPerShareDiluted",
+            "EarningsPerShare",
+            "BasicEarningsPerShare",
+            "DilutedEarningsPerShare"
+        ],
+        # For FCF Yield: (Operating Cash Flow - CapEx) / Market Cap
+        "Operating Cash Flow": [
+            "NetCashProvidedByUsedInOperatingActivities",
+            "OperatingCashFlow",
+            "CashFlowFromOperations",
+            "NetCashFromOperatingActivities",
+            "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
+        ],
+        "CapEx": [
+            "PaymentsToAcquirePropertyPlantEquipment",
+            "CapitalExpenditures",
+            "CapitalExpenditure",
+            "PurchaseOfPropertyPlantAndEquipment",
+            "InvestingCashFlowCapitalExpenditures",
+            "AcquisitionsNet"
+        ]
+    }
 
     for std_item, synonyms in standard_map.items():
         found_cols = [col for col in synonyms if col in pivoted.columns]
@@ -478,11 +397,11 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
 
 def main(event=None, context=None):
     """
-    Complete pipeline:
+    Complete pipeline for a single stock (AAPL):
       1. Load GCP credentials.
-      2. Read metadata.
-      3. Fetch SEC data (ALL tickers).
-      4. Fetch Yahoo market data (serial).
+      2. Manually set metadata for AAPL.
+      3. Fetch SEC data for AAPL.
+      4. Fetch Yahoo market data.
       5. Calculate ratios.
       6. Upload final table to BigQuery.
     """
@@ -494,32 +413,48 @@ def main(event=None, context=None):
     client = bigquery.Client(project='aialchemy', credentials=credentials)
     logger.info(f"Using credentials from {key_path}")
 
-    # 2) Metadata CSV
-    metadata_csv_path = "/home/eraphaelparra/profit-scout/data/sp500_metadata.csv"
+    # 2) Define the single ticker and its metadata
+    ticker = "AAPL"
+    # CIK_MAPPING already contains the mapping for AAPL.
+    meta_df = pd.DataFrame({
+        "ticker": [ticker],
+        "company_name": ["Apple Inc."],
+        "industry_name": ["Technology"],
+        "segment": ["Consumer Electronics"]
+    })
 
-    # 3) Fetch SEC data (for all tickers in CSV)
-    sec_df = load_all_financial_metrics(metadata_csv_path)
-    if sec_df.empty:
-        logger.error("No SEC data returned. Exiting.")
+    # 3) Fetch SEC data for AAPL
+    logger.info(f"Fetching SEC metrics for {ticker}...")
+    df_facts = get_latest_filing_facts(ticker)
+    if df_facts.empty:
+        logger.error("No SEC data returned for AAPL. Exiting.")
         return
-    logger.info(f"SEC DataFrame shape: {sec_df.shape}")
+    df_facts["ticker"] = ticker
+    # Attach metadata from the meta_df
+    row = meta_df.iloc[0]
+    df_facts["company_name"] = row.get("company_name", pd.NA)
+    df_facts["industry_name"] = row.get("industry_name", pd.NA)
+    df_facts["segment"] = row.get("segment", pd.NA)
+    logger.info(f"SEC DataFrame shape: {df_facts.shape}")
 
-    # 4) Fetch market data
-    market_df = fetch_market_data(sec_df)
-    if market_df.empty:
-        logger.error("No market data fetched. Exiting.")
+    # 4) Fetch market data using the latest reported 'end' date from SEC facts
+    reported_date = df_facts['end'].max()
+    market_data = fetch_single_ticker_market_data(ticker, reported_date)
+    if not market_data:
+        logger.error("No market data fetched for AAPL. Exiting.")
         return
+    market_df = pd.DataFrame([market_data])
     logger.info(f"Market DataFrame shape: {market_df.shape}")
 
     # 5) Calculate ratios
-    final_df = calculate_ratios(sec_df, market_df)
+    final_df = calculate_ratios(df_facts, market_df)
     if final_df.empty:
         logger.warning("Final DataFrame is empty; nothing to upload. Exiting.")
         return
     logger.info(f"Final table shape: {final_df.shape}")
 
     # 6) Upload final table to BigQuery
-    table_id = "aialchemy.financial_data.financial_ratios_final_all"
+    table_id = "aialchemy.financial_data.financial_ratios_final_aapl"
     logger.info(f"Uploading final table to {table_id}...")
     pandas_gbq.to_gbq(
         final_df,
