@@ -110,36 +110,40 @@ def extract_text_sections_ixbrl(filing_html: str) -> dict:
       - Risk Factors (Item 1A)
     We convert the iXBRL to plain text and use regex patterns.
     """
-    # Parse using the XML parser for better reliability with iXBRL
+    # Use BeautifulSoup with XML parsing for iXBRL
     soup = BeautifulSoup(filing_html, features="xml")
     full_text = soup.get_text(separator=" ", strip=True)
     full_text = re.sub(r'\s+', ' ', full_text)
     
-    # Debug: log a snippet of the full text to check structure
-    logging.debug("Full text from iXBRL (first 500 chars): " + full_text[:500])
+    # Debug: log a snippet of the full text to help adjust patterns
+    logging.debug("Full iXBRL text (first 500 chars): " + full_text[:500])
     
     sections = {}
-    # For MD&A: Look for "Item 7" until "Item 7A" or "Item 8"
+    # For MD&A: try a more flexible pattern.
+    # This pattern optionally ignores a preceding "Item 7" and searches for 
+    # "management's discussion and analysis" until "Item 7A" or "Item 8"
     mda_pattern = re.compile(
-        r'(?i)item\s*7\b.*?(?=item\s*7a\b|item\s*8\b)',
+        r'(?i)(?:item\s*7[\.\:\-\s]*)?management[’\'`]?s\s+discussion\s+and\s+analysis.*?(?=item\s*7a\b|item\s*8\b)',
         re.DOTALL)
     mda_match = mda_pattern.search(full_text)
     if mda_match:
         sections["MD&A"] = mda_match.group(0).strip()
         logging.info("MD&A section extracted successfully from iXBRL.")
     else:
-        logging.warning("MD&A section not found in iXBRL filing.")
+        logging.warning("MD&A section not found in iXBRL filing with updated pattern.")
     
-    # For Risk Factors: Look for "Item 1A" until "Item 1B" or "Item 2"
+    # For Risk Factors: use a more flexible pattern.
+    # This pattern optionally ignores a preceding "Item 1A" and searches for
+    # "risk factors" until "Item 1B" or "Item 2"
     risk_pattern = re.compile(
-        r'(?i)item\s*1a\b.*?(?=item\s*1b\b|item\s*2\b)',
+        r'(?i)(?:item\s*1a[\.\:\-\s]*)?risk\s*factors.*?(?=item\s*1b\b|item\s*2\b)',
         re.DOTALL)
     risk_match = risk_pattern.search(full_text)
     if risk_match:
         sections["Risk Factors"] = risk_match.group(0).strip()
         logging.info("Risk Factors section extracted successfully from iXBRL.")
     else:
-        logging.warning("Risk Factors section not found in iXBRL filing.")
+        logging.warning("Risk Factors section not found in iXBRL filing with updated pattern.")
     
     return sections
 
