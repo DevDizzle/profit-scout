@@ -225,4 +225,15 @@ def main():
                 "sentiment_score": sentiment.get("score"),
                 "sentiment_magnitude": sentiment.get("magnitude")
             }
-           
+            bq_rows.append(row)
+            logging.info(f"{ticker} - {section_name}: Prepared row for BigQuery.")
+            logging.info(f"{ticker} - {section_name} excerpt: {cleaned_text[:300]}...")
+        
+        store_to_bigquery(bq_rows, bq_client)
+        logging.info("Pipeline for AMZN using iXBRL complete.")
+        
+    except Exception as e:
+        logging.error(f"Error processing {ticker}: {e}")
+
+if __name__ == "__main__":
+    main()
