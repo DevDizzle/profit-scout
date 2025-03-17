@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Qualitative SEC Filing Text Extraction Pipeline for a single stock (AMZN)
+Using iXBRL parsing approach
 
 Steps:
   1. Load metadata from CSV.
   2. Get most recent filing (10-K/10-Q) for AMZN.
-  3. Download the filing HTML.
-  4. Extract MD&A and Risk Factors sections.
+  3. Construct and download the iXBRL filing HTML.
+  4. Extract MD&A (Item 7) and Risk Factors (Item 1A) sections.
   5. Clean the text and perform sentiment analysis using Google Cloud Natural Language API.
   6. Upload results to BigQuery table: aialchemy.financial_data.qualitative_sections
 """
@@ -26,6 +27,8 @@ from datetime import datetime
 from google.cloud import bigquery, language_v1
 from google.oauth2 import service_account
 
+from tenacity import retry, wait_exponential, stop_after_attempt
+
 # ---------------------------
 # CONFIGURATION & LOGGING
 # ---------------------------
@@ -34,7 +37,6 @@ SEC_HEADERS = {
     "User-Agent": "ProfitScout (eraphaelparra@gmail.com)",
     "Accept-Encoding": "gzip, deflate"
 }
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,71 +87,58 @@ def get_latest_filing_info(ticker: str, cik_map: dict):
         logging.error(f"Error fetching filing info for {ticker}: {e}")
         return None, None, None
 
-from tenacity import retry, wait_exponential, stop_after_attempt
-
 @retry(wait=wait_exponential(multiplier=1, max=10), stop=stop_after_attempt(3))
-def get_filing_html(cik: str, accession: str) -> str:
+def get_ixbrl_html(cik: str, accession: str, filing_date: datetime) -> str:
     """
-    Build the filing index URL from CIK and accession, then download the primary filing document HTML.
-    Retries on failure.
+    Construct the iXBRL URL and download the filing.
+    Here we assume the iXBRL URL follows the pattern:
+      https://www.sec.gov/ix?doc=/Archives/edgar/data/{cik}/{accession_nodash}/amzn-{filing_date}.htm
+    Adjust as needed.
     """
     accession_nodash = accession.replace("-", "")
-    index_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_nodash}/{accession_nodash}-index.htm"
-    logging.info(f"Downloading index page: {index_url}")
-    resp = requests.get(index_url, headers=SEC_HEADERS)
-    resp.raise_for_status()  # This will raise an HTTPError for 503 and trigger a retry
-    soup = BeautifulSoup(resp.text, "html.parser")
-    # Find the link to the primary document (exclude '-index.htm')
-    doc_link = None
-    for a in soup.find_all('a', href=True):
-        href = a['href']
-        if href.lower().endswith('.htm') and "index" not in href.lower():
-            doc_link = "https://www.sec.gov" + href
-            break
-    if not doc_link:
-        logging.error("Primary filing document not found.")
-        return ""
-    logging.info(f"Primary filing document URL: {doc_link}")
-    # Sleep a bit before downloading document
-    time.sleep(random.uniform(*SLEEP_TIME))
-    doc_resp = requests.get(doc_link, headers=SEC_HEADERS)
-    doc_resp.raise_for_status()
-    return doc_resp.text
+    # Format the filing date as YYYYMMDD
+    filing_date_str = filing_date.strftime("%Y%m%d")
+    # Construct the iXBRL URL; this example uses 'amzn' in the filename.
+    ixbrl_url = f"https://www.sec.gov/ix?doc=/Archives/edgar/data/{int(cik)}/{accession_nodash}/amzn-{filing_date_str}.htm"
+    logging.info(f"Downloading iXBRL filing from: {ixbrl_url}")
+    resp = requests.get(ixbrl_url, headers=SEC_HEADERS)
+    resp.raise_for_status()
+    return resp.text
 
-
-def extract_text_sections(filing_html: str) -> dict:
+def extract_text_sections_ixbrl(filing_html: str) -> dict:
     """
-    Convert filing HTML to plain text and use regex to extract:
+    Parse the iXBRL filing to extract:
       - MD&A (Item 7)
       - Risk Factors (Item 1A)
-    Returns a dictionary with keys "MD&A" and "Risk Factors".
+    We convert the iXBRL to plain text and use regex patterns.
     """
+    # Use BeautifulSoup to parse XML-like iXBRL
     soup = BeautifulSoup(filing_html, "lxml")
     full_text = soup.get_text(separator=" ", strip=True)
     full_text = re.sub(r'\s+', ' ', full_text)
     
     sections = {}
-    # Extract MD&A: from "Item 7" (including "Management's Discussion") until "Item 7A" or "Item 8"
+    # For MD&A: look for "Item 7" (and "Management's Discussion") until "Item 7A" or "Item 8"
     mda_pattern = re.compile(
         r'item\s*7[\.\:\-\s]+management[’\'`]?s\s+discussion.*?(?=item\s*7a|item\s*8)', 
         re.IGNORECASE | re.DOTALL)
     mda_match = mda_pattern.search(full_text)
     if mda_match:
         sections["MD&A"] = mda_match.group(0).strip()
-        logging.info("MD&A section extracted successfully.")
+        logging.info("MD&A section extracted successfully from iXBRL.")
     else:
-        logging.warning("MD&A section not found.")
+        logging.warning("MD&A section not found in iXBRL filing.")
     
-    # Extract Risk Factors: from "Item 1A" (Risk Factors) until "Item 1B" or "Item 2"
+    # For Risk Factors: look for "Item 1A" (Risk Factors) until "Item 1B" or "Item 2"
     risk_pattern = re.compile(
         r'item\s*1a[\.\:\-\s]+risk\s*factors.*?(?=item\s*1b|item\s*2)', 
         re.IGNORECASE | re.DOTALL)
     risk_match = risk_pattern.search(full_text)
     if risk_match:
         sections["Risk Factors"] = risk_match.group(0).strip()
-        logging.info("Risk Factors section extracted successfully.")
+        logging.info("Risk Factors section extracted successfully from iXBRL.")
     else:
-        logging.warning("Risk Factors section not found.")
+        logging.warning("Risk Factors section not found in iXBRL filing.")
     
     return sections
 
@@ -185,12 +174,11 @@ def store_to_bigquery(rows: list, client: bigquery.Client):
         logging.error(f"BigQuery upload failed: {e}")
 
 # ---------------------------
-# MAIN PIPELINE FOR AMZN
+# MAIN PIPELINE FOR AMZN USING iXBRL
 # ---------------------------
 def main():
-    # Process only AMZN
     ticker = "AMZN"
-    logging.info(f"Processing qualitative sections for {ticker}...")
+    logging.info(f"Processing qualitative sections for {ticker} using iXBRL...")
     
     cik_map = load_cik_mapping(METADATA_CSV)
     
@@ -209,14 +197,15 @@ def main():
         logging.info(f"{ticker}: Using {form_type} filing dated {filing_date.date()}")
         
         cik = cik_map.get(ticker)
-        filing_html = get_filing_html(cik, acc_num)
+        # Use the iXBRL URL directly
+        filing_html = get_ixbrl_html(cik, acc_num, filing_date)
         if not filing_html:
-            logging.error(f"Could not download filing HTML for {ticker}. Exiting.")
+            logging.error(f"Could not download iXBRL filing HTML for {ticker}. Exiting.")
             return
         
-        sections = extract_text_sections(filing_html)
+        sections = extract_text_sections_ixbrl(filing_html)
         if not sections:
-            logging.error(f"No sections extracted for {ticker}. Exiting.")
+            logging.error(f"No sections extracted for {ticker} from iXBRL. Exiting.")
             return
         
         # Process each section (MD&A and Risk Factors)
@@ -236,17 +225,4 @@ def main():
                 "sentiment_score": sentiment.get("score"),
                 "sentiment_magnitude": sentiment.get("magnitude")
             }
-            bq_rows.append(row)
-            logging.info(f"{ticker} - {section_name}: Prepared row for BigQuery.")
-            
-            # For troubleshooting, print first 300 characters of the section
-            logging.info(f"{ticker} - {section_name} excerpt: {cleaned_text[:300]}...")
-        
-        store_to_bigquery(bq_rows, bq_client)
-        logging.info("Pipeline for AMZN complete.")
-        
-    except Exception as e:
-        logging.error(f"Error processing {ticker}: {e}")
-
-if __name__ == "__main__":
-    main()
+           
