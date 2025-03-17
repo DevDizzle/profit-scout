@@ -394,51 +394,52 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     # Enhanced standard mapping using additional synonyms from fact_key
     standard_map = {
         "Net Income": [
-            "us-gaap:NetIncomeLoss",
-            "us-gaap:NetIncomeFromContinuingOperations",
-            "us-gaap:NetIncomeApplicableToCommonStockholders"
+            "NetIncomeLoss",
+            "NetIncomeFromContinuingOperations",
+            "NetIncomeApplicableToCommonStockholders"
         ],
         "Total Equity": [
-            "us-gaap:StockholdersEquity",
-            "us-gaap:StockholdersEquityAttributableToParent",
-            "us-gaap:TotalStockholdersEquity"
+            "StockholdersEquity",
+            "StockholdersEquityAttributableToParent",
+            "TotalStockholdersEquity"
         ],
         "Total Debt": [
-            "us-gaap:Liabilities",
-            "us-gaap:LongTermDebt",
-            "us-gaap:ShortTermDebt",
-            "us-gaap:DebtAndCapitalLeaseObligations"
+            "Liabilities",
+            "LongTermDebt",
+            "ShortTermDebt",
+            "DebtAndCapitalLeaseObligations"
         ],
         "Current Assets": [
-            "us-gaap:AssetsCurrent",
-            "us-gaap:CurrentAssets"
+            "AssetsCurrent",
+            "CurrentAssets"
         ],
         "Current Liabilities": [
-            "us-gaap:LiabilitiesCurrent",
-            "us-gaap:CurrentLiabilities"
+            "LiabilitiesCurrent",
+            "CurrentLiabilities"
         ],
         "Revenues": [
-            "us-gaap:Revenues",
-            "us-gaap:SalesRevenueNet",
-            "us-gaap:RevenuesNetOfInterestExpense"
+            "Revenues",
+            "SalesRevenueNet",
+            "RevenuesNetOfInterestExpense"
         ],
         "Cost of Goods Sold": [
-            "us-gaap:CostOfGoodsSold",
-            "us-gaap:CostOfRevenue"
+            "CostOfGoodsSold",
+            "CostOfRevenue"
         ],
         "Earnings Per Share": [
-            "us-gaap:EarningsPerShareBasic",
-            "us-gaap:EarningsPerShareDiluted"
+            "EarningsPerShareBasic",
+            "EarningsPerShareDiluted"
         ],
         "Operating Cash Flow": [
-            "us-gaap:NetCashProvidedByUsedInOperatingActivities",
-            "us-gaap:OperatingCashFlow"
+            "NetCashProvidedByUsedInOperatingActivities",
+            "OperatingCashFlow"
         ],
         "CapEx": [
-            "us-gaap:PaymentsToAcquirePropertyPlantEquipment",
-            "us-gaap:CapitalExpenditures"
+            "PaymentsToAcquirePropertyPlantEquipment",
+            "CapitalExpenditures"
         ]
     }
+
 
     # Map the synonyms to standardized columns.
     for std_item, synonyms in standard_map.items():
