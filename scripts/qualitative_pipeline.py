@@ -39,7 +39,7 @@ SEC_HEADERS = {
 }
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO,  # Change to DEBUG for more verbose output
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
@@ -93,12 +93,10 @@ def get_ixbrl_html(cik: str, accession: str, filing_date: datetime) -> str:
     Construct the iXBRL URL and download the filing.
     Here we assume the iXBRL URL follows the pattern:
       https://www.sec.gov/ix?doc=/Archives/edgar/data/{cik}/{accession_nodash}/amzn-{filing_date}.htm
-    Adjust as needed.
+    Adjust this pattern if necessary.
     """
     accession_nodash = accession.replace("-", "")
-    # Format the filing date as YYYYMMDD
     filing_date_str = filing_date.strftime("%Y%m%d")
-    # Construct the iXBRL URL; this example uses 'amzn' in the filename.
     ixbrl_url = f"https://www.sec.gov/ix?doc=/Archives/edgar/data/{int(cik)}/{accession_nodash}/amzn-{filing_date_str}.htm"
     logging.info(f"Downloading iXBRL filing from: {ixbrl_url}")
     resp = requests.get(ixbrl_url, headers=SEC_HEADERS)
@@ -107,21 +105,24 @@ def get_ixbrl_html(cik: str, accession: str, filing_date: datetime) -> str:
 
 def extract_text_sections_ixbrl(filing_html: str) -> dict:
     """
-    Parse the iXBRL filing to extract:
+    Parse the iXBRL filing (using an XML parser) to extract:
       - MD&A (Item 7)
       - Risk Factors (Item 1A)
     We convert the iXBRL to plain text and use regex patterns.
     """
-    # Use BeautifulSoup to parse XML-like iXBRL
-    soup = BeautifulSoup(filing_html, "lxml")
+    # Parse using the XML parser for better reliability with iXBRL
+    soup = BeautifulSoup(filing_html, features="xml")
     full_text = soup.get_text(separator=" ", strip=True)
     full_text = re.sub(r'\s+', ' ', full_text)
     
+    # Debug: log a snippet of the full text to check structure
+    logging.debug("Full text from iXBRL (first 500 chars): " + full_text[:500])
+    
     sections = {}
-    # For MD&A: look for "Item 7" (and "Management's Discussion") until "Item 7A" or "Item 8"
+    # For MD&A: Look for "Item 7" until "Item 7A" or "Item 8"
     mda_pattern = re.compile(
-        r'item\s*7[\.\:\-\s]+management[’\'`]?s\s+discussion.*?(?=item\s*7a|item\s*8)', 
-        re.IGNORECASE | re.DOTALL)
+        r'(?i)item\s*7\b.*?(?=item\s*7a\b|item\s*8\b)',
+        re.DOTALL)
     mda_match = mda_pattern.search(full_text)
     if mda_match:
         sections["MD&A"] = mda_match.group(0).strip()
@@ -129,10 +130,10 @@ def extract_text_sections_ixbrl(filing_html: str) -> dict:
     else:
         logging.warning("MD&A section not found in iXBRL filing.")
     
-    # For Risk Factors: look for "Item 1A" (Risk Factors) until "Item 1B" or "Item 2"
+    # For Risk Factors: Look for "Item 1A" until "Item 1B" or "Item 2"
     risk_pattern = re.compile(
-        r'item\s*1a[\.\:\-\s]+risk\s*factors.*?(?=item\s*1b|item\s*2)', 
-        re.IGNORECASE | re.DOTALL)
+        r'(?i)item\s*1a\b.*?(?=item\s*1b\b|item\s*2\b)',
+        re.DOTALL)
     risk_match = risk_pattern.search(full_text)
     if risk_match:
         sections["Risk Factors"] = risk_match.group(0).strip()
