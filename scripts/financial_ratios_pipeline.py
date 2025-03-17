@@ -36,12 +36,20 @@ SEC_HEADERS = {
     "Host": "data.sec.gov"
 }
 
-# Global ticker -> padded CIK mapping. For AAPL, the CIK is 0000320193.
-CIK_MAPPING = {"AAPL": "0000320193"}
+# =============================================================================
+#                     HELPER FUNCTIONS: CIK MAPPING & SEC DATA
+# =============================================================================
 
-# =============================================================================
-#                     HELPER FUNCTIONS (SEC + METADATA)
-# =============================================================================
+def load_cik_mapping(metadata_csv: str) -> dict:
+    """
+    Read ticker->CIK from CSV, zero-pad the CIK to 10 digits.
+    The CSV should contain at least 'ticker' and 'cik' columns.
+    """
+    df = pd.read_csv(metadata_csv)
+    cik_map = {str(row['ticker']).upper(): str(row['cik']).zfill(10)
+               for _, row in df.iterrows()}
+    logger.info(f"Loaded CIK mapping for {len(cik_map)} tickers.")
+    return cik_map
 
 def _submission_url(cik: str) -> str:
     return f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json"
@@ -181,16 +189,16 @@ def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) ->
     base_date = reported_date.date() if hasattr(reported_date, 'date') else reported_date
 
     for offset in range(MAX_DAYS_FORWARD + 1):
-        try_date = base_date + timedelta(days=offset)
-        # Skip weekends quickly
-        if try_date.weekday() >= 5:
-            continue
-
-        # Polite, random sleep
-        time.sleep(random.uniform(*SLEEP_TIME))
-
-        stock = yf.Ticker(ticker)
         try:
+            try_date = base_date + timedelta(days=offset)
+            # Skip weekends quickly
+            if try_date.weekday() >= 5:
+                continue
+
+            # Polite, random sleep
+            time.sleep(random.uniform(*SLEEP_TIME))
+
+            stock = yf.Ticker(ticker)
             hist = stock.history(start=try_date, end=try_date + timedelta(days=1), interval='1d')
             if hist.empty:
                 continue
@@ -331,8 +339,8 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
             "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
         ],
         "CapEx": [
-            "PaymentsToAcquirePropertyPlantAndEquipment",            # corrected key with "And"
-            "CapitalExpendituresIncurredButNotYetPaid",                # added key from your findings
+            "PaymentsToAcquirePropertyPlantAndEquipment",  # corrected key with "And"
+            "CapitalExpendituresIncurredButNotYetPaid",      # added key from findings
             "CapitalExpenditures",
             "CapitalExpenditure",
             "PurchaseOfPropertyPlantAndEquipment",
@@ -398,11 +406,11 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
 
 def main(event=None, context=None):
     """
-    Complete pipeline for a single stock (AAPL):
+    Complete pipeline for all S&P500 companies:
       1. Load GCP credentials.
-      2. Manually set metadata for AAPL.
-      3. Fetch SEC data for AAPL.
-      4. Fetch Yahoo market data.
+      2. Load metadata CSV and build CIK mapping.
+      3. Loop over tickers to fetch SEC data and attach metadata.
+      4. For each ticker, fetch market data using the latest SEC 'end' date.
       5. Calculate ratios.
       6. Upload final table to BigQuery.
     """
@@ -414,48 +422,74 @@ def main(event=None, context=None):
     client = bigquery.Client(project='aialchemy', credentials=credentials)
     logger.info(f"Using credentials from {key_path}")
 
-    # 2) Define the single ticker and its metadata
-    ticker = "AAPL"
-    # CIK_MAPPING already contains the mapping for AAPL.
-    meta_df = pd.DataFrame({
-        "ticker": [ticker],
-        "company_name": ["Apple Inc."],
-        "industry_name": ["Technology"],
-        "segment": ["Consumer Electronics"]
-    })
+    # 2) Load metadata CSV (ensure the CSV has 'ticker', 'company_name', 'industry_name', 'segment', and 'cik' columns)
+    metadata_csv_path = "/home/eraphaelparra/profit-scout/data/sp500_metadata.csv"
+    meta_df = pd.read_csv(metadata_csv_path)
+    logger.info(f"Loaded metadata for {len(meta_df)} companies.")
+    
+    # Build global CIK mapping
+    global CIK_MAPPING
+    CIK_MAPPING = load_cik_mapping(metadata_csv_path)
 
-    # 3) Fetch SEC data for AAPL
-    logger.info(f"Fetching SEC metrics for {ticker}...")
-    df_facts = get_latest_filing_facts(ticker)
-    if df_facts.empty:
-        logger.error("No SEC data returned for AAPL. Exiting.")
-        return
-    df_facts["ticker"] = ticker
-    # Attach metadata from the meta_df
-    row = meta_df.iloc[0]
-    df_facts["company_name"] = row.get("company_name", pd.NA)
-    df_facts["industry_name"] = row.get("industry_name", pd.NA)
-    df_facts["segment"] = row.get("segment", pd.NA)
-    logger.info(f"SEC DataFrame shape: {df_facts.shape}")
+    # 3) Loop through tickers to fetch SEC data and attach metadata
+    sec_frames = []
+    tickers = meta_df['ticker'].str.upper().unique().tolist()
+    logger.info(f"Fetching SEC metrics for {len(tickers)} tickers...")
+    for i, ticker in enumerate(tickers, 1):
+        logger.info(f"[{i}/{len(tickers)}] Processing ticker: {ticker}")
+        try:
+            df_facts = get_latest_filing_facts(ticker)
+            if df_facts.empty:
+                logger.info(f"No SEC data for {ticker}. Skipping.")
+                continue
+            df_facts["ticker"] = ticker
+            # Attach metadata for the ticker
+            row = meta_df[meta_df['ticker'].str.upper() == ticker].iloc[0]
+            df_facts["company_name"] = row.get("company_name", pd.NA)
+            df_facts["industry_name"] = row.get("industry_name", pd.NA)
+            df_facts["segment"] = row.get("segment", pd.NA)
+            sec_frames.append(df_facts)
+        except Exception as e:
+            logger.error(f"Error processing ticker {ticker}: {e}")
 
-    # 4) Fetch market data using the latest reported 'end' date from SEC facts
-    reported_date = df_facts['end'].max()
-    market_data = fetch_single_ticker_market_data(ticker, reported_date)
-    if not market_data:
-        logger.error("No market data fetched for AAPL. Exiting.")
+    if not sec_frames:
+        logger.error("No SEC data collected for any ticker. Exiting.")
         return
-    market_df = pd.DataFrame([market_data])
+    sec_df = pd.concat(sec_frames, ignore_index=True)
+    logger.info(f"Combined SEC DataFrame shape: {sec_df.shape}")
+
+    # 4) Loop through unique (ticker, end) pairs to fetch market data
+    market_frames = []
+    needed = sec_df[['ticker', 'end']].drop_duplicates()
+    needed = needed.dropna(subset=['ticker', 'end'])
+    total = len(needed)
+    logger.info(f"Fetching market data for {total} (ticker, end) pairs...")
+    for count, row in needed.iterrows():
+        ticker = row['ticker']
+        end_date = row['end']
+        logger.info(f"Fetching market data for {ticker} (end={end_date.date()})...")
+        data_dict = fetch_single_ticker_market_data(ticker, end_date)
+        if data_dict:
+            logger.info(f"  => Found market data for {ticker} on {data_dict['actual_market_date']}")
+            market_frames.append(data_dict)
+        else:
+            logger.info(f"  => No market data found for {ticker} near {end_date.date()}")
+
+    if not market_frames:
+        logger.error("No market data fetched. Exiting.")
+        return
+    market_df = pd.DataFrame(market_frames)
     logger.info(f"Market DataFrame shape: {market_df.shape}")
 
     # 5) Calculate ratios
-    final_df = calculate_ratios(df_facts, market_df)
+    final_df = calculate_ratios(sec_df, market_df)
     if final_df.empty:
         logger.warning("Final DataFrame is empty; nothing to upload. Exiting.")
         return
     logger.info(f"Final table shape: {final_df.shape}")
 
     # 6) Upload final table to BigQuery
-    table_id = "aialchemy.financial_data.financial_ratios_final_aapl"
+    table_id = "aialchemy.financial_data.financial_ratios_final_all"
     logger.info(f"Uploading final table to {table_id}...")
     pandas_gbq.to_gbq(
         final_df,
