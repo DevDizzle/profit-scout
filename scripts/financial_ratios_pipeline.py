@@ -391,7 +391,7 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     print("DEBUG: Pivoted DataFrame after converting date and numeric columns:")
     print(pivoted.head())
 
-standard_map = {
+    standard_map = {
     # For ROE: Net Income / Total Equity
     "Net Income": [
         "NetIncomeLoss",
