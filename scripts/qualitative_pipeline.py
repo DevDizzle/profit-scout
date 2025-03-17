@@ -85,34 +85,37 @@ def get_latest_filing_info(ticker: str, cik_map: dict):
         logging.error(f"Error fetching filing info for {ticker}: {e}")
         return None, None, None
 
+from tenacity import retry, wait_exponential, stop_after_attempt
+
+@retry(wait=wait_exponential(multiplier=1, max=10), stop=stop_after_attempt(3))
 def get_filing_html(cik: str, accession: str) -> str:
     """
     Build the filing index URL from CIK and accession, then download the primary filing document HTML.
+    Retries on failure.
     """
     accession_nodash = accession.replace("-", "")
     index_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_nodash}/{accession_nodash}-index.htm"
     logging.info(f"Downloading index page: {index_url}")
-    try:
-        resp = requests.get(index_url, headers=SEC_HEADERS)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-        doc_link = None
-        for a in soup.find_all('a', href=True):
-            href = a['href']
-            if href.lower().endswith('.htm') and "index" not in href.lower():
-                doc_link = "https://www.sec.gov" + href
-                break
-        if not doc_link:
-            logging.error("Primary filing document not found.")
-            return ""
-        logging.info(f"Primary filing document URL: {doc_link}")
-        time.sleep(random.uniform(*SLEEP_TIME))
-        doc_resp = requests.get(doc_link, headers=SEC_HEADERS)
-        doc_resp.raise_for_status()
-        return doc_resp.text
-    except Exception as e:
-        logging.error(f"Error fetching filing HTML: {e}")
+    resp = requests.get(index_url, headers=SEC_HEADERS)
+    resp.raise_for_status()  # This will raise an HTTPError for 503 and trigger a retry
+    soup = BeautifulSoup(resp.text, "html.parser")
+    # Find the link to the primary document (exclude '-index.htm')
+    doc_link = None
+    for a in soup.find_all('a', href=True):
+        href = a['href']
+        if href.lower().endswith('.htm') and "index" not in href.lower():
+            doc_link = "https://www.sec.gov" + href
+            break
+    if not doc_link:
+        logging.error("Primary filing document not found.")
         return ""
+    logging.info(f"Primary filing document URL: {doc_link}")
+    # Sleep a bit before downloading document
+    time.sleep(random.uniform(*SLEEP_TIME))
+    doc_resp = requests.get(doc_link, headers=SEC_HEADERS)
+    doc_resp.raise_for_status()
+    return doc_resp.text
+
 
 def extract_text_sections(filing_html: str) -> dict:
     """
