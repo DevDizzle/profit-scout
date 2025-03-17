@@ -406,7 +406,6 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         "ShareholdersEquity",
         "CommonStockholdersEquity"
     ],
-    
     # For Debt-to-Equity: Total Debt / Total Equity
     "Total Debt": [
         "LongTermDebt",
@@ -414,7 +413,6 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         "DebtAndCapitalLeaseObligations",
         "TotalDebt"
     ],
-    
     # For Current Ratio: Current Assets / Current Liabilities
     "Current Assets": [
         "AssetsCurrent",
@@ -424,7 +422,6 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         "LiabilitiesCurrent",
         "CurrentLiabilities"
     ],
-    
     # For Gross Margin: (Revenues - Cost of Goods Sold) / Revenues
     "Revenues": [
         "Revenues",
@@ -432,14 +429,13 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         "RevenuesNetOfInterestExpense",
         "TotalRevenue",
         "Revenue",
-        "RevenueFromContractWithCustomerExcludingAssessedTax"  # if applicable
+        "RevenueFromContractWithCustomerExcludingAssessedTax"
     ],
     "Cost of Goods Sold": [
         "CostOfGoodsSold",
         "CostOfRevenue",
         "CostOfGoodsAndServicesSold"
     ],
-    
     # For P/E Ratio: Market Price / Earnings Per Share
     "Earnings Per Share": [
         "EarningsPerShareBasic",
@@ -448,20 +444,24 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         "BasicEarningsPerShare",
         "DilutedEarningsPerShare"
     ],
-    
     # For FCF Yield: (Operating Cash Flow - CapEx) / Market Cap
     "Operating Cash Flow": [
         "NetCashProvidedByUsedInOperatingActivities",
         "OperatingCashFlow",
-        "CashFlowFromOperations"
+        "CashFlowFromOperations",
+        "NetCashFromOperatingActivities",
+        "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
     ],
     "CapEx": [
         "PaymentsToAcquirePropertyPlantEquipment",
         "CapitalExpenditures",
         "CapitalExpenditure",
-        "PurchaseOfPropertyPlantAndEquipment"
+        "PurchaseOfPropertyPlantAndEquipment",
+        "InvestingCashFlowCapitalExpenditures",
+        "AcquisitionsNet"
     ]
 }
+
 
 
     # Map the synonyms to standardized columns.
