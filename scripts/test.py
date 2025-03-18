@@ -47,7 +47,7 @@ standard_map = {
         "NetIncomeApplicableToCommonStockholders",           
         "NetIncomeLoss",                                     
         "NetIncome"                                     
-    ]
+    ],
     "Total Equity": [
         "StockholdersEquity",
         "StockholdersEquityAttributableToParent",
