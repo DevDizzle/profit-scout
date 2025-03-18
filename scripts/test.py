@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import os
 import time
 import random
@@ -19,10 +20,10 @@ import yfinance as yf
 # =============================================================================
 
 SLEEP_TIME = (3, 6)       # random sleep for market data
-MAX_DAYS_FORWARD = 5      # how many days forward we check from the reporting end date
+MAX_DAYS_FORWARD = 5      # how many days forward we check from the 'end' date
 
 logger = logging.getLogger('financial_pipeline')
-logger.setLevel(logging.DEBUG)  # set DEBUG for detailed logging
+logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -36,113 +37,88 @@ SEC_HEADERS = {
 }
 
 # =============================================================================
-#             GLOBAL SETTINGS & CIK MAPPING FOR TARGET STOCKS
+#                     HELPER FUNCTIONS: SEC DATA & CIK MAPPING
 # =============================================================================
 
-# For our six stocks, we define the CIKs explicitly.
-CIK_MAPPING = {
-    "CTVA": "0001755672",
-    "AES":  "0000874761",
-    "NTAP": "0001002047",
-    "GIS":  "0000040704",
-    "NOC":  "0001133421",
-    "CMI":  "0000026172"
-}
+def load_cik_mapping(metadata_csv: str) -> dict:
+    """
+    Read ticker->CIK from CSV, zero-pad the CIK to 10 digits.
+    The CSV should contain at least 'ticker' and 'cik' columns.
+    (Not used in this test version.)
+    """
+    df = pd.read_csv(metadata_csv)
+    cik_map = {str(row['ticker']).upper(): str(row['cik']).zfill(10)
+               for _, row in df.iterrows()}
+    logger.info(f"Loaded CIK mapping for {len(cik_map)} tickers.")
+    return cik_map
 
-# =============================================================================
-#                     HELPER FUNCTIONS: SEC DATA & REPORTING DATE
-# =============================================================================
+def _submission_url(cik: str) -> str:
+    return f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json"
 
 def _facts_url(cik: str) -> str:
     return f"https://data.sec.gov/api/xbrl/companyfacts/CIK{int(cik):010d}.json"
 
-def _submissions_url(cik: str) -> str:
-    return f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json"
-
 @retry(wait=wait_exponential(multiplier=1, max=10), stop=stop_after_attempt(3))
 def get_submission_data_for_ticker(ticker: str) -> pd.DataFrame:
     """
-    Fetch recent submission data (e.g., 10-K/10-Q filings) for a given ticker.
+    Fetch recent SEC submissions for a single ticker (based on CIK).
+    Raises if no data or HTTP error.
     """
-    cik = CIK_MAPPING.get(ticker.upper())
+    cik = CIK_MAPPING.get(ticker)
     if not cik:
         raise ValueError(f"No CIK for ticker {ticker}")
-    url = _submissions_url(cik)
-    logger.debug(f"Fetching submission data for {ticker} from {url}")
+
+    url = _submission_url(cik)
     resp = requests.get(url, headers=SEC_HEADERS)
     resp.raise_for_status()
     data = resp.json().get("filings", {}).get("recent", {})
-    df = pd.DataFrame(data)
-    logger.debug(f"Retrieved {df.shape[0]} submission rows for {ticker}")
-    return df
+    return pd.DataFrame(data)
 
-def get_latest_filing_end_date(ticker: str) -> pd.Timestamp:
+def get_latest_filing_info(ticker: str):
     """
-    For the given ticker, get the official reporting period end date from the latest 10-K/10-Q.
-    We expect the submission data to include a field such as 'reportPeriod' (or 'periodOfReport').
+    Return (accessionNumber, formType, filingDate) for the most recent 10-K or 10-Q.
+    If none, return (None, None, None).
     """
-    sub_df = get_submission_data_for_ticker(ticker)
-    if sub_df.empty:
-        logger.warning(f"No submission data for {ticker}.")
-        return pd.NaT
+    try:
+        df = get_submission_data_for_ticker(ticker)
+        relevant = df[df['form'].isin(['10-K', '10-Q'])].copy()
+        if relevant.empty:
+            logger.warning(f"No 10-K or 10-Q for {ticker}")
+            return None, None, None
 
-    # Filter to filings that are 10-K or 10-Q
-    sub_df = sub_df[sub_df['form'].isin(['10-K','10-Q'])].copy()
-    if sub_df.empty:
-        logger.warning(f"No 10-K or 10-Q filings for {ticker}.")
-        return pd.NaT
-
-    # Convert filingDate to datetime
-    sub_df['filingDate'] = pd.to_datetime(sub_df['filingDate'], errors='coerce')
-    # Sort descending by filingDate
-    sub_df = sub_df.sort_values('filingDate', ascending=False)
-    
-    # Try to extract the reporting period end date.
-    # Look for a field such as 'reportPeriod' or 'periodOfReport'
-    possible_cols = ['reportPeriod', 'periodOfReport', 'reportdate']
-    lower_cols = [c.lower() for c in sub_df.columns]
-    found_col = None
-    for c in possible_cols:
-        if c.lower() in lower_cols:
-            found_col = c
-            break
-
-    if not found_col:
-        logger.warning(f"No official reporting date field found in submission data for {ticker}.")
-        return pd.NaT
-
-    latest_row = sub_df.iloc[0]
-    date_str = latest_row.get(found_col, "")
-    end_date = pd.to_datetime(date_str, errors='coerce')
-    if pd.isna(end_date):
-        logger.warning(f"Could not parse a valid date from {found_col} for {ticker}")
-    else:
-        logger.debug(f"For {ticker}, official reporting end date is {end_date}")
-    return end_date
+        relevant['filingDate'] = pd.to_datetime(relevant['filingDate'], errors='coerce')
+        recent = relevant.sort_values('filingDate', ascending=False).iloc[0]
+        return recent['accessionNumber'], recent['form'], recent['filingDate']
+    except Exception as exc:
+        logger.error(f"Error fetching filing info for {ticker}: {exc}")
+        return None, None, None
 
 @retry(wait=wait_exponential(multiplier=1, max=10), stop=stop_after_attempt(3))
 def get_facts_json(ticker: str) -> dict:
     """
-    Fetch the XBRL company facts JSON for the given ticker.
+    Fetch XBRL company facts JSON from SEC for a given ticker's CIK.
     """
-    cik = CIK_MAPPING.get(ticker.upper())
+    cik = CIK_MAPPING.get(ticker)
     if not cik:
         raise ValueError(f"No CIK for ticker {ticker}")
+
     url = _facts_url(cik)
-    logger.debug(f"Fetching facts JSON for {ticker} from {url}")
     resp = requests.get(url, headers=SEC_HEADERS)
     resp.raise_for_status()
     return resp.json()
 
 def facts_to_df(facts_json: dict) -> pd.DataFrame:
     """
-    Convert the 'us-gaap' portion of the XBRL facts into a DataFrame.
+    Convert 'us-gaap' portion of XBRL facts into a Pandas DataFrame.
+    Extracts the fact key (as 'fact_key') and the reported value (as 'value')
+    along with other metadata.
     """
     rows = []
     gaap_facts = facts_json.get('facts', {}).get('us-gaap', {})
     if not gaap_facts:
-        logger.warning("No us-gaap facts found in JSON.")
+        logger.warning("No us-gaap facts found.")
         return pd.DataFrame()
+
     for fact_key, fact_val in gaap_facts.items():
         units = fact_val.get('units', {})
         for unit, entries in units.items():
@@ -152,66 +128,101 @@ def facts_to_df(facts_json: dict) -> pd.DataFrame:
                     'label': fact_val.get('label'),
                     'unit': unit,
                     'value': entry.get('val'),
-                    'start': entry.get('start'),
-                    'end': entry.get('end'),
+                    'start': entry.get('start', None),
+                    'end': entry.get('end', None),
                     'fy': entry.get('fy'),
                     'fp': entry.get('fp'),
                     'form': entry.get('form'),
                     'filed': entry.get('filed')
                 })
-    df = pd.DataFrame(rows)
-    logger.debug(f"Converted facts to DataFrame with {len(df)} rows")
-    return df
+
+    return pd.DataFrame(rows)
 
 def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
     """
-    Get the SEC facts for the given ticker, filtering only to the rows
-    that correspond to the official reporting period end date.
+    1) Get the most recent 10-K/10-Q info (accession, form, filingDate).
+    2) Pull the company facts from SEC.
+    3) Filter the facts to only include rows corresponding to the official reporting period end date,
+       determined by the official (maximum) filing date and its associated reporting period.
     """
-    facts_json = get_facts_json(ticker)
-    df_facts = facts_to_df(facts_json)
-    if df_facts.empty:
+    accession, form_type, filing_date = get_latest_filing_info(ticker)
+    if not accession:
         return pd.DataFrame()
-    df_facts['end'] = pd.to_datetime(df_facts['end'], errors='coerce')
-    actual_end_date = get_latest_filing_end_date(ticker)
-    if pd.isna(actual_end_date):
-        logger.warning(f"{ticker}: No official reporting end date found; using fallback max(end).")
-        last_date = df_facts['end'].max()
-    else:
-        if actual_end_date in df_facts['end'].values:
-            last_date = actual_end_date
-        else:
-            logger.warning(f"{ticker}: Official reporting end date {actual_end_date} not found in facts; using fallback.")
-            last_date = df_facts['end'].max()
-    filtered = df_facts[df_facts['end'] == last_date].copy()
-    logger.debug(f"{ticker} facts for reporting period end {last_date.date()} sample:\n{filtered.head()}")
-    return filtered
+
+    try:
+        data_json = get_facts_json(ticker)
+        df_facts = facts_to_df(data_json)
+        if df_facts.empty:
+            return pd.DataFrame()
+
+        # Convert 'end' and 'filed' to datetime (ignore errors)
+        df_facts['end'] = pd.to_datetime(df_facts['end'], errors='coerce')
+        df_facts['filed'] = pd.to_datetime(df_facts['filed'], errors='coerce')
+
+        # Exclude facts with future 'end' dates
+        today = pd.Timestamp.today().normalize()
+        df_facts = df_facts[df_facts['end'] <= today]
+        if df_facts.empty:
+            logger.info(f"{ticker}: All 'end' dates are in the future, skipping.")
+            return pd.DataFrame()
+
+        # Filter to facts corresponding to the official filing date from the submission
+        official_filing_date = pd.to_datetime(filing_date)
+        df_official = df_facts[df_facts['filed'] == official_filing_date]
+        if df_official.empty:
+            logger.warning(f"{ticker}: No facts match the official filing date {official_filing_date}. "
+                           "Falling back to the maximum 'filed' date available in facts.")
+            max_filed = df_facts['filed'].max()
+            df_official = df_facts[df_facts['filed'] == max_filed]
+
+        # Determine the official reporting period end date from the filtered facts
+        official_end = df_official['end'].max()
+        recent = df_official[df_official['end'] == official_end].copy()
+
+        recent['accn'] = accession
+        recent['form'] = form_type
+        recent['filed'] = filing_date
+        return recent
+    except Exception as exc:
+        logger.error(f"Error fetching facts for {ticker}: {exc}")
+        return pd.DataFrame()
 
 # =============================================================================
-#                     FETCH MARKET DATA (SERIAL)
+#                     PIPELINE: FETCH MARKET DATA (SERIAL)
 # =============================================================================
 
 def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) -> dict:
     """
-    For the given reporting date, try up to MAX_DAYS_FORWARD to find the first trading day
-    with market data. Returns a dictionary with market price, market cap, etc.
+    For the given 'reported_date' (the official reporting period end date from SEC),
+    we try up to MAX_DAYS_FORWARD to find the first trading day with data.
+    Return a single dict with:
+      [ticker, as_of_date, actual_market_date, market_price, market_cap, dividend].
     """
     if pd.isna(reported_date):
         return {}
+
     base_date = reported_date.date() if hasattr(reported_date, 'date') else reported_date
+
     for offset in range(MAX_DAYS_FORWARD + 1):
         try:
             try_date = base_date + timedelta(days=offset)
+            # Skip weekends quickly
             if try_date.weekday() >= 5:
                 continue
+
+            # Polite, random sleep
             time.sleep(random.uniform(*SLEEP_TIME))
+
             stock = yf.Ticker(ticker)
             hist = stock.history(start=try_date, end=try_date + timedelta(days=1), interval='1d')
             if hist.empty:
                 continue
+
             close_price = hist['Close'].iloc[0]
             if pd.isna(close_price):
                 continue
+
+            # Attempt to gather market cap from sharesOutstanding
             info = {}
             for _ in range(3):
                 try:
@@ -220,16 +231,18 @@ def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) ->
                 except Exception as e:
                     logger.warning(f"Retry reading 'stock.info' for {ticker}: {e}")
                     time.sleep(2)
+
             shares_outstanding = info.get('sharesOutstanding')
             if shares_outstanding:
                 market_cap = close_price * float(shares_outstanding)
             else:
                 market_cap = info.get('marketCap', np.nan)
+
             dividend = info.get('dividendRate', 0.0)
-            logger.debug(f"{ticker} market data on {try_date}: Price={close_price}, Cap={market_cap}")
+
             return {
                 'ticker': ticker,
-                'as_of_date': str(base_date),  # reporting period end date
+                'as_of_date': str(base_date),  # The official reporting period end date
                 'actual_market_date': str(try_date),
                 'market_price': float(close_price),
                 'market_cap': float(market_cap) if market_cap else np.nan,
@@ -238,43 +251,49 @@ def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) ->
         except Exception as exc:
             logger.error(f"Error fetching Yahoo data for {ticker} on {try_date}: {exc}")
             continue
+
     return {}
 
 # =============================================================================
-#                     CALCULATE RATIOS & FINAL OUTPUT
+#                     PIPELINE: CALCULATE RATIOS & FINAL OUTPUT
 # =============================================================================
 
 def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Pivot the SEC facts, merge with market data, and calculate key financial ratios.
+    1) Pivot SEC data on (ticker, company_name, industry_name, segment, end).
+    2) Merge with market_df on (ticker, as_of_date).
+    3) Calculate ratios.
+    4) Return final DataFrame with extra columns: industry_name, segment, etc.
     """
     if sec_df.empty:
         logger.warning("SEC DataFrame is empty! No ratios to compute.")
         return pd.DataFrame()
+
     if market_df.empty:
         logger.warning("Market DataFrame is empty! No ratios to compute.")
         return pd.DataFrame()
+
     logger.info("Pivoting SEC data to compute ratios...")
-    # Fill missing grouping columns
+
+    # Fill missing grouping columns so pivot_table won't drop rows
     sec_df['company_name'] = sec_df['company_name'].fillna('UnknownCompany')
     sec_df['industry_name'] = sec_df['industry_name'].fillna('UnknownIndustry')
     sec_df['segment'] = sec_df['segment'].fillna('UnknownSegment')
+
     pivot_cols = ['ticker', 'company_name', 'industry_name', 'segment', 'end']
     df_sec = sec_df[pivot_cols + ['fact_key', 'value']].copy().dropna(subset=['ticker', 'end', 'fact_key'])
+
     pivoted = df_sec.pivot_table(
         index=pivot_cols,
         columns='fact_key',
         values='value',
         aggfunc='max'
     ).reset_index()
-    # Use the reporting period as a string for merging market data
+
     pivoted['as_of_date'] = pivoted['end'].dt.date.astype(str)
-    
-    logger.debug("Pivoted SEC data columns:")
-    logger.debug(pivoted.columns.tolist())
-    
-    # Standard mapping for the metrics we want to compute
+
     standard_map = {
+        # For ROE: Net Income / Total Equity
         "Net Income": [
             "NetIncomeLoss",
             "NetIncomeFromContinuingOperations",
@@ -288,12 +307,14 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
             "ShareholdersEquity",
             "CommonStockholdersEquity"
         ],
+        # For Debt-to-Equity: Total Debt / Total Equity
         "Total Debt": [
             "LongTermDebt",
             "ShortTermDebt",
             "DebtAndCapitalLeaseObligations",
             "TotalDebt"
         ],
+        # For Current Ratio: Current Assets / Current Liabilities
         "Current Assets": [
             "AssetsCurrent",
             "CurrentAssets"
@@ -302,6 +323,7 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
             "LiabilitiesCurrent",
             "CurrentLiabilities"
         ],
+        # For Gross Margin: (Revenues - Cost of Goods Sold) / Revenues
         "Revenues": [
             "Revenues",
             "SalesRevenueNet",
@@ -315,6 +337,7 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
             "CostOfRevenue",
             "CostOfGoodsAndServicesSold"
         ],
+        # For P/E Ratio: Market Price / Earnings Per Share
         "Earnings Per Share": [
             "EarningsPerShareBasic",
             "EarningsPerShareDiluted",
@@ -322,6 +345,7 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
             "BasicEarningsPerShare",
             "DilutedEarningsPerShare"
         ],
+        # For FCF Yield: (Operating Cash Flow - CapEx) / Market Cap
         "Operating Cash Flow": [
             "NetCashProvidedByUsedInOperatingActivities",
             "OperatingCashFlow",
@@ -330,8 +354,8 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
             "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
         ],
         "CapEx": [
-            "PaymentsToAcquirePropertyPlantAndEquipment",
-            "CapitalExpendituresIncurredButNotYetPaid",
+            "PaymentsToAcquirePropertyPlantAndEquipment",  # corrected key with "And"
+            "CapitalExpendituresIncurredButNotYetPaid",      # added key from findings
             "CapitalExpenditures",
             "CapitalExpenditure",
             "PurchaseOfPropertyPlantAndEquipment",
@@ -340,14 +364,13 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         ]
     }
 
-    for metric, synonyms in standard_map.items():
+    for std_item, synonyms in standard_map.items():
         found_cols = [col for col in synonyms if col in pivoted.columns]
         if found_cols:
-            pivoted[metric] = pivoted[found_cols].bfill(axis=1).iloc[:, 0]
+            pivoted[std_item] = pivoted[found_cols].bfill(axis=1).iloc[:, 0]
         else:
-            pivoted[metric] = np.nan
-            logger.debug(f"For metric '{metric}', no matching columns found among {synonyms}")
-    
+            pivoted[std_item] = np.nan
+
     logger.info(f"Merging pivoted SEC data (shape={pivoted.shape}) with market data (shape={market_df.shape})")
     merged = pd.merge(
         pivoted,
@@ -355,26 +378,23 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
         how='left',
         on=['ticker', 'as_of_date']
     )
-    
-    logger.debug("Merged data sample:")
-    logger.debug(merged.head(10).to_string())
-    
+
     if merged.empty:
         logger.warning("Final merge returned an empty DataFrame. No matching (ticker, as_of_date).")
         return pd.DataFrame()
-    
+
     # Calculate ratios
-    merged['ROE'] = pd.to_numeric(merged['Net Income'], errors='coerce') / pd.to_numeric(merged['Total Equity'], errors='coerce')
-    merged['Debt_to_Equity'] = pd.to_numeric(merged['Total Debt'], errors='coerce') / pd.to_numeric(merged['Total Equity'], errors='coerce')
-    merged['Current_Ratio'] = pd.to_numeric(merged['Current Assets'], errors='coerce') / pd.to_numeric(merged['Current Liabilities'], errors='coerce')
-    merged['Gross_Margin'] = (pd.to_numeric(merged['Revenues'], errors='coerce') - pd.to_numeric(merged.get('Cost of Goods Sold', 0.0), errors='coerce')) / pd.to_numeric(merged['Revenues'], errors='coerce')
-    merged['Free_Cash_Flow'] = pd.to_numeric(merged['Operating Cash Flow'], errors='coerce') - pd.to_numeric(merged.get('CapEx', 0.0), errors='coerce')
-    merged['P_E_Ratio'] = pd.to_numeric(merged['market_price'], errors='coerce') / pd.to_numeric(merged['Earnings Per Share'], errors='coerce')
-    merged['FCF_Yield'] = pd.to_numeric(merged['Free_Cash_Flow'], errors='coerce') / pd.to_numeric(merged['market_cap'], errors='coerce')
-    
-    logger.debug("Calculated ratios sample:")
-    logger.debug(merged[['ticker', 'ROE', 'Debt_to_Equity', 'Current_Ratio', 'Gross_Margin', 'P_E_Ratio', 'FCF_Yield']].head(10).to_string())
-    
+    merged['ROE'] = merged['Net Income'] / merged['Total Equity']
+    merged['Debt_to_Equity'] = merged['Total Debt'] / merged['Total Equity']
+    merged['Current_Ratio'] = merged['Current Assets'] / merged['Current Liabilities']
+    merged['Gross_Margin'] = (
+        (merged['Revenues'] - merged.get('Cost of Goods Sold', 0.0))
+        / merged['Revenues']
+    )
+    merged['Free_Cash_Flow'] = merged['Operating Cash Flow'] - merged.get('CapEx', 0.0)
+    merged['P_E_Ratio'] = merged['market_price'] / merged['Earnings Per Share']
+    merged['FCF_Yield'] = merged['Free_Cash_Flow'] / merged['market_cap']
+
     final_cols = [
         'ticker',
         'company_name',
@@ -396,20 +416,20 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     return final_df
 
 # =============================================================================
-#                                 MAIN
+#                                 MAIN (TEST MODE)
 # =============================================================================
 
 def main(event=None, context=None):
     """
-    Complete pipeline for six target stocks with updated reporting date logic:
-      1. Load metadata (for our six stocks).
-      2. Build CIK mapping.
-      3. For each ticker, fetch SEC facts and filter to the official reporting period end date.
-      4. Fetch market data using that reporting date.
-      5. Pivot, merge, and calculate ratios.
-      6. Upload the final table to BigQuery.
+    Complete pipeline for our six test stocks:
+      1. Set explicit CIK mapping and create a test metadata DataFrame.
+      2. Loop over tickers to fetch SEC data and attach metadata.
+      3. For each ticker, fetch market data using the official reporting period end date.
+      4. Calculate ratios.
+      5. Upload final table to BigQuery.
     """
-    # 1) Credentials
+
+    # 1) Credentials (update the key_path as needed)
     key_path = "/home/eraphaelparra/aialchemy.json"
     credentials = service_account.Credentials.from_service_account_file(
         key_path, scopes=['https://www.googleapis.com/auth/cloud-platform']
@@ -417,16 +437,30 @@ def main(event=None, context=None):
     client = bigquery.Client(project='aialchemy', credentials=credentials)
     logger.info(f"Using credentials from {key_path}")
 
-    # 2) Load metadata CSV (ensure it has 'ticker', 'company_name', 'industry_name', 'segment', and 'cik')
-    metadata_csv_path = "/home/eraphaelparra/profit-scout/data/sp500_metadata.csv"
-    meta_df = pd.read_csv(metadata_csv_path)
-    target_tickers = ["CTVA", "AES", "NTAP", "GIS", "NOC", "CMI"]
-    meta_df = meta_df[meta_df['ticker'].str.upper().isin(target_tickers)]
-    logger.info(f"Filtered metadata to {len(meta_df)} companies: {target_tickers}")
+    # For our six test stocks, we define the CIKs explicitly.
+    global CIK_MAPPING
+    CIK_MAPPING = {
+        "CTVA": "0001755672",
+        "AES":  "0000874761",
+        "NTAP": "0001002047",
+        "GIS":  "0000040704",
+        "NOC":  "0001133421",
+        "CMI":  "0000026172"
+    }
 
-    # Global CIK_MAPPING is already defined above.
+    # Create a small metadata DataFrame for testing.
+    meta_data = [
+        {"ticker": "CTVA", "company_name": "Corteva Inc.", "industry_name": "Agriculture", "segment": "Agribusiness"},
+        {"ticker": "AES",  "company_name": "The AES Corporation", "industry_name": "Utilities", "segment": "Electric"},
+        {"ticker": "NTAP", "company_name": "NetApp Inc.", "industry_name": "Technology", "segment": "Data Management"},
+        {"ticker": "GIS",  "company_name": "General Mills Inc.", "industry_name": "Consumer Staples", "segment": "Food"},
+        {"ticker": "NOC",  "company_name": "Northrop Grumman Corp.", "industry_name": "Defense", "segment": "Aerospace & Defense"},
+        {"ticker": "CMI",  "company_name": "Cummins Inc.", "industry_name": "Industrial", "segment": "Power Systems"},
+    ]
+    meta_df = pd.DataFrame(meta_data)
+    logger.info(f"Test metadata loaded for {len(meta_df)} companies.")
 
-    # 3) Loop through tickers to fetch SEC facts (using reporting end date) and attach metadata
+    # 2) Loop through tickers to fetch SEC data and attach metadata
     sec_frames = []
     tickers = meta_df['ticker'].str.upper().unique().tolist()
     logger.info(f"Fetching SEC metrics for {len(tickers)} tickers...")
@@ -437,8 +471,8 @@ def main(event=None, context=None):
             if df_facts.empty:
                 logger.info(f"No SEC data for {ticker}. Skipping.")
                 continue
-            logger.debug(f"Raw SEC data for {ticker} (filtered to reporting period):\n{df_facts.head()}")
             df_facts["ticker"] = ticker
+            # Attach metadata for the ticker from our test DataFrame
             row = meta_df[meta_df['ticker'].str.upper() == ticker].iloc[0]
             df_facts["company_name"] = row.get("company_name", pd.NA)
             df_facts["industry_name"] = row.get("industry_name", pd.NA)
@@ -452,42 +486,38 @@ def main(event=None, context=None):
         return
     sec_df = pd.concat(sec_frames, ignore_index=True)
     logger.info(f"Combined SEC DataFrame shape: {sec_df.shape}")
-    logger.debug("Combined SEC DataFrame sample:")
-    print(sec_df.head(10).to_string())
 
-    # 4) Loop through unique (ticker, end) pairs to fetch market data
+    # 3) Loop through unique (ticker, end) pairs to fetch market data
     market_frames = []
-    needed = sec_df[['ticker', 'end']].drop_duplicates().dropna(subset=['ticker', 'end'])
+    needed = sec_df[['ticker', 'end']].drop_duplicates()
+    needed = needed.dropna(subset=['ticker', 'end'])
     total = len(needed)
     logger.info(f"Fetching market data for {total} (ticker, end) pairs...")
     for count, row in needed.iterrows():
         ticker = row['ticker']
         end_date = row['end']
-        logger.info(f"Fetching market data for {ticker} (reporting end={end_date.date()})...")
+        logger.info(f"Fetching market data for {ticker} (end={end_date.date()})...")
         data_dict = fetch_single_ticker_market_data(ticker, end_date)
         if data_dict:
             logger.info(f"  => Found market data for {ticker} on {data_dict['actual_market_date']}")
             market_frames.append(data_dict)
         else:
             logger.info(f"  => No market data found for {ticker} near {end_date.date()}")
+
     if not market_frames:
         logger.error("No market data fetched. Exiting.")
         return
     market_df = pd.DataFrame(market_frames)
     logger.info(f"Market DataFrame shape: {market_df.shape}")
-    logger.debug("Market DataFrame sample:")
-    print(market_df.head(10).to_string())
 
-    # 5) Calculate ratios
+    # 4) Calculate ratios
     final_df = calculate_ratios(sec_df, market_df)
     if final_df.empty:
         logger.warning("Final DataFrame is empty; nothing to upload. Exiting.")
         return
     logger.info(f"Final table shape: {final_df.shape}")
-    logger.debug("Final DataFrame sample:")
-    print(final_df.head(10).to_string())
 
-    # 6) Upload final table to BigQuery
+    # 5) Upload final table to BigQuery
     table_id = "aialchemy.financial_data.financial_ratios_final_all"
     logger.info(f"Uploading final table to {table_id}...")
     pandas_gbq.to_gbq(
