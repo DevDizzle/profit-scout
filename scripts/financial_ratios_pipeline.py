@@ -437,7 +437,7 @@ def main(event=None, context=None):
       3. For each ticker, fetch SEC data using updated mapping logic and attach metadata.
       4. For each ticker, fetch market data using the official reporting period end date.
       5. Calculate ratios.
-      6. Upload the final table ("Financial_Ratios") to BigQuery.
+      6. Upload the final table ("financial_ratios") to BigQuery.
     """
     # 1) Credentials
     key_path = "/home/eraphaelparra/aialchemy.json"
@@ -507,7 +507,7 @@ def main(event=None, context=None):
         return
     logger.info(f"Final table shape: {final_df.shape}")
 
-    # 6) Upload final table to BigQuery under table "Financial_Ratios".
+    # 6) Upload final table to BigQuery under table "financial_ratios".
     table_id = "aialchemy.financial_data.financial_ratios"
     logger.info(f"Uploading final table to {table_id}...")
     pandas_gbq.to_gbq(
