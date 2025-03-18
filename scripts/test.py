@@ -42,11 +42,12 @@ SEC_HEADERS = {
 standard_map = {
     # For ROE: Net Income / Total Equity
     "Net Income": [
-        "NetIncomeLoss",
-        "NetIncomeFromContinuingOperations",
-        "NetIncomeApplicableToCommonStockholders",
-        "NetIncome"
-    ],
+        "NetIncomeLossAvailableToCommonStockholdersBasic", 
+        "NetIncomeFromContinuingOperations",               
+        "NetIncomeApplicableToCommonStockholders",           
+        "NetIncomeLoss",                                     
+        "NetIncome"                                     
+    ]
     "Total Equity": [
         "StockholdersEquity",
         "StockholdersEquityAttributableToParent",
@@ -54,13 +55,16 @@ standard_map = {
         "ShareholdersEquity",
         "CommonStockholdersEquity"
     ],
-    # For Debt-to-Equity: Total Debt / Total Equity
     "Total Debt": [
-        "LongTermDebt",
-        "ShortTermDebt",
-        "DebtAndCapitalLeaseObligations",
-        "TotalDebt"
-    ],
+        "TotalDebt",                                   
+        "LongTermDebtAndCapitalLeaseObligations",      
+        "DebtAndCapitalLeaseObligations",             
+        "LongTermDebt",                                
+        "DebtCurrent",                                
+        "LongTermDebtCurrent",                         
+        "ShortTermDebt",                               
+        "DebtInstrumentUnamortizedDiscountPremiumAndDebtIssuanceCostsNet"  
+]
     # For Current Ratio: Current Assets / Current Liabilities
     "Current Assets": [
         "AssetsCurrent",
@@ -101,15 +105,15 @@ standard_map = {
         "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
     ],
     "CapEx": [
-        "PaymentsToAcquirePropertyPlantAndEquipment",  # corrected key with "And"
-        "CapitalExpendituresIncurredButNotYetPaid",      # added key from findings
+        "PaymentsToAcquireProductiveAssets",             
+        "PaymentsToAcquirePropertyPlantAndEquipment",    
+        "CapitalExpendituresIncurredButNotYetPaid",
         "CapitalExpenditures",
         "CapitalExpenditure",
         "PurchaseOfPropertyPlantAndEquipment",
         "InvestingCashFlowCapitalExpenditures",
         "AcquisitionsNet"
     ]
-}
 
 # =============================================================================
 #                   HELPER FUNCTIONS: SEC DATA & CIK MAPPING
