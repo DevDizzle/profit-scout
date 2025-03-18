@@ -64,7 +64,7 @@ standard_map = {
         "LongTermDebtCurrent",                         
         "ShortTermDebt",                               
         "DebtInstrumentUnamortizedDiscountPremiumAndDebtIssuanceCostsNet"  
-]
+    ],
     # For Current Ratio: Current Assets / Current Liabilities
     "Current Assets": [
         "AssetsCurrent",
