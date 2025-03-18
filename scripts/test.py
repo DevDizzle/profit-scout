@@ -114,7 +114,7 @@ standard_map = {
         "InvestingCashFlowCapitalExpenditures",
         "AcquisitionsNet"
     ]
-
+}
 # =============================================================================
 #                   HELPER FUNCTIONS: SEC DATA & CIK MAPPING
 # =============================================================================
