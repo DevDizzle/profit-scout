@@ -139,9 +139,10 @@ def facts_to_df(facts_json: dict) -> pd.DataFrame:
 
 def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
     """
-    1) Get the most recent 10-K/10-Q info (accession, form, filing_date).
+    1) Get the most recent 10-K/10-Q info (accession, form, filingDate).
     2) Pull the company facts from SEC.
-    3) Filter to the last 'end' date in that dataset, ignoring future 'end' > today.
+    3) Filter the facts to only include rows corresponding to the official reporting period end date,
+       determined by the official (maximum) filing date and its associated reporting period.
     """
     accession, form_type, filing_date = get_latest_filing_info(ticker)
     if not accession:
@@ -153,16 +154,29 @@ def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
         if df_facts.empty:
             return pd.DataFrame()
 
+        # Convert 'end' and 'filed' to datetime (ignore errors)
         df_facts['end'] = pd.to_datetime(df_facts['end'], errors='coerce')
-        # Exclude future dates
+        df_facts['filed'] = pd.to_datetime(df_facts['filed'], errors='coerce')
+
+        # Exclude facts with future 'end' dates
         today = pd.Timestamp.today().normalize()
         df_facts = df_facts[df_facts['end'] <= today]
         if df_facts.empty:
             logger.info(f"{ticker}: All 'end' dates are in the future, skipping.")
             return pd.DataFrame()
 
-        last_date = df_facts['end'].max()
-        recent = df_facts[df_facts['end'] == last_date].copy()
+        # Filter to facts corresponding to the official filing date from the submission
+        official_filing_date = pd.to_datetime(filing_date)
+        df_official = df_facts[df_facts['filed'] == official_filing_date]
+        if df_official.empty:
+            logger.warning(f"{ticker}: No facts match the official filing date {official_filing_date}. "
+                           "Falling back to the maximum 'filed' date available in facts.")
+            max_filed = df_facts['filed'].max()
+            df_official = df_facts[df_facts['filed'] == max_filed]
+
+        # Determine the official reporting period end date from the filtered facts
+        official_end = df_official['end'].max()
+        recent = df_official[df_official['end'] == official_end].copy()
 
         recent['accn'] = accession
         recent['form'] = form_type
@@ -178,7 +192,7 @@ def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
 
 def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) -> dict:
     """
-    For the given 'reported_date' (the last reported 'end' from SEC),
+    For the given 'reported_date' (the official reporting period end date from SEC),
     we try up to MAX_DAYS_FORWARD to find the first trading day with data.
     Return a single dict with:
       [ticker, as_of_date, actual_market_date, market_price, market_cap, dividend].
@@ -227,7 +241,7 @@ def fetch_single_ticker_market_data(ticker: str, reported_date: pd.Timestamp) ->
 
             return {
                 'ticker': ticker,
-                'as_of_date': str(base_date),  # The original 'end' date
+                'as_of_date': str(base_date),  # The official reporting period end date
                 'actual_market_date': str(try_date),
                 'market_price': float(close_price),
                 'market_cap': float(market_cap) if market_cap else np.nan,
@@ -410,7 +424,7 @@ def main(event=None, context=None):
       1. Load GCP credentials.
       2. Load metadata CSV and build CIK mapping.
       3. Loop over tickers to fetch SEC data and attach metadata.
-      4. For each ticker, fetch market data using the latest SEC 'end' date.
+      4. For each ticker, fetch market data using the official reporting period end date.
       5. Calculate ratios.
       6. Upload final table to BigQuery.
     """
