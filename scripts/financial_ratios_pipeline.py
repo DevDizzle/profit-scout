@@ -40,32 +40,39 @@ SEC_HEADERS = {
 # =============================================================================
 
 standard_map = {
-    # For ROE: Net Income / Total Equity
     "Net Income": [
-        "NetIncomeLossAvailableToCommonStockholdersBasic", 
-        "NetIncomeFromContinuingOperations",               
-        "NetIncomeApplicableToCommonStockholders",           
-        "NetIncomeLoss",                                     
-        "NetIncome"                                     
+        "NetIncomeLossAvailableToCommonStockholdersBasic",
+        "NetIncomeFromContinuingOperations",
+        "NetIncomeApplicableToCommonStockholders",
+        "NetIncomeLoss",
+        "NetIncome",
+        "ProfitLoss",
+        "NetIncomeLossAvailableToCommonStockholdersDiluted"
     ],
     "Total Equity": [
         "StockholdersEquity",
         "StockholdersEquityAttributableToParent",
         "TotalStockholdersEquity",
         "ShareholdersEquity",
-        "CommonStockholdersEquity"
+        "CommonStockholdersEquity",
+        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+        "MinorityInterest",
+        "PartnersCapital",
+        "PartnersCapitalAccount"
     ],
     "Total Debt": [
-        "TotalDebt",                                   
-        "LongTermDebtAndCapitalLeaseObligations",      
-        "DebtAndCapitalLeaseObligations",             
-        "LongTermDebt",                                
-        "DebtCurrent",                                
-        "LongTermDebtCurrent",                         
-        "ShortTermDebt",                               
-        "DebtInstrumentUnamortizedDiscountPremiumAndDebtIssuanceCostsNet"  
+        "TotalDebt",
+        "LongTermDebtAndCapitalLeaseObligations",
+        "DebtAndCapitalLeaseObligations",
+        "LongTermDebt",
+        "DebtCurrent",
+        "LongTermDebtCurrent",
+        "ShortTermDebt",
+        "DebtInstrumentUnamortizedDiscountPremiumAndDebtIssuanceCostsNet",
+        "LongTermDebtNoncurrent",
+        "ShortTermBorrowings",
+        "CommercialPaper"
     ],
-    # For Current Ratio: Current Assets / Current Liabilities
     "Current Assets": [
         "AssetsCurrent",
         "CurrentAssets"
@@ -74,7 +81,6 @@ standard_map = {
         "LiabilitiesCurrent",
         "CurrentLiabilities"
     ],
-    # For Gross Margin: (Revenues - Cost of Goods Sold) / Revenues
     "Revenues": [
         "Revenues",
         "SalesRevenueNet",
@@ -88,15 +94,22 @@ standard_map = {
         "CostOfRevenue",
         "CostOfGoodsAndServicesSold"
     ],
-    # For P/E Ratio: Market Price / Earnings Per Share
+    "Gross Profit": [
+        "GrossProfit"
+    ],
     "Earnings Per Share": [
         "EarningsPerShareBasic",
         "EarningsPerShareDiluted",
         "EarningsPerShare",
         "BasicEarningsPerShare",
-        "DilutedEarningsPerShare"
+        "DilutedEarningsPerShare",
+        "EarningsPerShareBasicAndDiluted"
     ],
-    # For FCF Yield: (Operating Cash Flow - CapEx) / Market Cap
+    "Dividends": [
+        "CommonStockDividendsPerShareDeclared",
+        "DividendsCommonStock",
+        "CommonStockDividendsPerShareCashPaid"
+    ],
     "Operating Cash Flow": [
         "NetCashProvidedByUsedInOperatingActivities",
         "OperatingCashFlow",
@@ -105,17 +118,18 @@ standard_map = {
         "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"
     ],
     "CapEx": [
-        "PaymentsToAcquireProductiveAssets",             
-        "PaymentsToAcquirePropertyPlantAndEquipment",    
+        "PaymentsToAcquireProductiveAssets",
+        "PaymentsToAcquirePropertyPlantAndEquipment",
         "CapitalExpendituresIncurredButNotYetPaid",
         "CapitalExpenditures",
         "CapitalExpenditure",
         "PurchaseOfPropertyPlantAndEquipment",
         "InvestingCashFlowCapitalExpenditures",
-        "AcquisitionsNet"
+        "AcquisitionsNet",
+        "PaymentsToAcquireIntangibleAssets",
+        "PaymentsForSoftware"
     ]
 }
-
 # =============================================================================
 #                    HELPER FUNCTION: LOAD CIK MAPPING
 # =============================================================================
@@ -371,11 +385,19 @@ def calculate_ratios(sec_df: pd.DataFrame, market_df: pd.DataFrame) -> pd.DataFr
     if merged.empty:
         logger.warning("Final merge returned an empty DataFrame.")
         return pd.DataFrame()
+        
     # Calculate ratios.
     merged['ROE'] = merged['Net Income'] / merged['Total Equity']
     merged['Debt_to_Equity'] = merged['Total Debt'] / merged['Total Equity']
     merged['Current_Ratio'] = merged['Current Assets'] / merged['Current Liabilities']
+
+    # Default approach: (Revenues - COGS) / Revenues
     merged['Gross_Margin'] = (merged['Revenues'] - merged.get('Cost of Goods Sold', 0.0)) / merged['Revenues']
+
+    # Fallback to Gross Profit if COGS is unavailable but Gross Profit is present
+    mask = merged['Cost of Goods Sold'].isna() & merged['Gross Profit'].notna()
+    merged.loc[mask, 'Gross_Margin'] = merged.loc[mask, 'Gross Profit'] / merged.loc[mask, 'Revenues']
+
     merged['Free_Cash_Flow'] = merged['Operating Cash Flow'] - merged.get('CapEx', 0.0)
     merged['P_E_Ratio'] = merged['market_price'] / merged['Earnings Per Share']
     merged['FCF_Yield'] = merged['Free_Cash_Flow'] / merged['market_cap']
