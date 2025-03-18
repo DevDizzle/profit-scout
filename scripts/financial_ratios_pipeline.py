@@ -508,7 +508,7 @@ def main(event=None, context=None):
     logger.info(f"Final table shape: {final_df.shape}")
 
     # 6) Upload final table to BigQuery under table "Financial_Ratios".
-    table_id = "aialchemy.financial_data.Financial_Ratios"
+    table_id = "aialchemy.financial_data.financial_ratios"
     logger.info(f"Uploading final table to {table_id}...")
     pandas_gbq.to_gbq(
         final_df,
