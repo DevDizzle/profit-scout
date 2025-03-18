@@ -205,6 +205,7 @@ def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
       4. Filters to only include rows where the 'filed' date equals the official filing date.
       5. Restricts to allowed fact keys (as defined in standard_map).
       6. For each mapping (friendly name), selects the row with the maximum 'end' date.
+         If multiple rows have that same end date, it selects the one with the latest 'start' date.
     The result is a DataFrame with one row per mapping.
     """
     accession, form_type, filing_date = get_latest_filing_info(ticker)
@@ -235,14 +236,20 @@ def get_latest_filing_facts(ticker: str) -> pd.DataFrame:
         for keys in standard_map.values():
             allowed_fact_keys.update(keys)
         df_mapped = df_official[df_official['fact_key'].isin(allowed_fact_keys)].copy()
-        # For each mapping, select the row with the maximum 'end' date.
+        # For each mapping, select the row with the maximum 'end' date,
+        # using the latest 'start' date as tie-breaker.
         result_rows = []
         for friendly, keys in standard_map.items():
             sub = df_mapped[df_mapped['fact_key'].isin(keys)]
             if sub.empty:
                 continue
+            # Get the maximum 'end' date for these rows.
             max_end = sub['end'].max()
-            row_max = sub[sub['end'] == max_end].iloc[0].copy()
+            sub_max_end = sub[sub['end'] == max_end]
+            # Tie-breaker: sort by 'start' in descending order (later start means shorter period).
+            # Note: if 'start' is NaT, it will be sorted last.
+            sub_sorted = sub_max_end.sort_values(by='start', ascending=False)
+            row_max = sub_sorted.iloc[0].copy()
             row_max['mapping'] = friendly
             result_rows.append(row_max)
         if not result_rows:
