@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { v4 as uuidv4 } from "uuid";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 interface Message {
-  id: number;
+  id: string;
   text: string;
   type: "user" | "bot";
   timestamp: string;
@@ -22,7 +23,7 @@ export default function ChatUI() {
     setMessages((prev) => [
       ...prev,
       {
-        id: Date.now(),
+        id: uuidv4(),
         text: `ProfitScout is analyzing ${ticker}...`,
         type: "bot",
         timestamp: new Date().toLocaleString(),
@@ -62,7 +63,7 @@ ${synthesisData.synthesis}
       setMessages((prev) => [
         ...prev,
         {
-          id: Date.now(),
+          id: uuidv4(),
           text: formattedMessage,
           type: "bot",
           timestamp: new Date().toLocaleString(),
@@ -72,7 +73,7 @@ ${synthesisData.synthesis}
       setMessages((prev) => [
         ...prev,
         {
-          id: Date.now(),
+          id: uuidv4(),
           text: "Error fetching synthesis. Try again.",
           type: "bot",
           timestamp: new Date().toLocaleString(),
@@ -89,7 +90,7 @@ ${synthesisData.synthesis}
     setMessages((prev) => [
       ...prev,
       {
-        id: Date.now(),
+        id: uuidv4(),
         text: query,
         type: "user",
         timestamp: new Date().toLocaleString(),
