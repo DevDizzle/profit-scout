@@ -2,6 +2,7 @@ import os
 import yaml
 import logging
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from app.api import greeter, quantative, qualitative, synthesizer
 
@@ -30,6 +31,15 @@ logging.basicConfig(
 
 # Initialize FastAPI app
 app = FastAPI(title=config["app"]["name"], version=config["app"]["version"])
+
+# Add CORSMiddleware to allow requests from the frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # You can restrict this to specific origins, e.g., ["http://localhost:5173"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include routes from the updated agent modules
 app.include_router(greeter.router, tags=["Stock Selection"])
