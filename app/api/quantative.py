@@ -6,7 +6,7 @@ from google.cloud import storage
 
 router = APIRouter(prefix="/quantative")
 
-# Initialize Google Cloud Storage client (make sure GOOGLE_APPLICATION_CREDENTIALS is set in your .env)
+# Initialize Google Cloud Storage client
 storage_client = storage.Client()
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "aialchemy_bucket")
 bucket = storage_client.bucket(GCS_BUCKET_NAME)
