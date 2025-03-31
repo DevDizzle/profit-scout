@@ -1,4 +1,3 @@
-# File: app/services/gemini_service.py
 import os
 import json
 import re
@@ -24,18 +23,22 @@ model = genai.GenerativeModel(
 def suggest_stocks(user_query: str):
     """
     Return Gemini's stock suggestions based on a user query.
+    This version is "grounded" in Google Search results. The prompt instructs the model
+    to reference the latest verified information from Google Search.
     """
     prompt = f"""
-    You are a financial expert. Suggest **three** diversified S&P 500 stocks relevant to:
+    You are a financial expert. Using your capabilities and by grounding your answer in Google Search results,
+    suggest **three** diversified S&P 500 stocks relevant to the query below. Provide a brief reason for each pick,
+    ensuring diversification across sectors.
 
-    "{user_query}"
+    Query: "{user_query}"
 
-    Provide a brief reason for each pick, ensuring diversification across sectors.
+    Your answer should be grounded in recent and verified data from Google Search.
     """
     try:
         response = model.generate_content(prompt)
         result = response.text.strip() if response.text else "No response from Gemini"
-        logger.info("✅ Gemini stock suggestions received successfully")
+        logger.info("✅ Gemini stock suggestions (grounded) received successfully")
         return result
     except Exception as e:
         logger.error(f"❌ Gemini API error in suggest_stocks: {e}", exc_info=True)
