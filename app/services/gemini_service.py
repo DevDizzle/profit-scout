@@ -18,7 +18,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Initialize the Gemini model with "gemini-2.0-flash"
 model = genai.GenerativeModel(
     "gemini-2.0-flash",
-    generation_config={"temperature": 0.5, "max_output_tokens": 1024}
+    generation_config={"temperature": 0.1, "max_output_tokens": 1024}
 )
 
 def suggest_stocks(user_query: str):
