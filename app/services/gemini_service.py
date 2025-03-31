@@ -1,6 +1,7 @@
 # File: app/services/gemini_service.py
 import os
 import json
+import re
 from dotenv import load_dotenv
 import google.generativeai as genai
 from app.utils.logger import logger
@@ -37,7 +38,7 @@ def suggest_stocks(user_query: str):
         logger.info("✅ Gemini stock suggestions received successfully")
         return result
     except Exception as e:
-        logger.error(f"❌ Gemini API error in suggest_stocks: {e}")
+        logger.error(f"❌ Gemini API error in suggest_stocks: {e}", exc_info=True)
         return "⚠️ An error occurred while generating stock suggestions."
 
 def analyze_yahoo_data(ticker: str, csv_content: str):
@@ -91,16 +92,21 @@ Based on these metrics, provide a recommendation (Buy, Sell, or Hold). Return on
     try:
         response = model.generate_content(prompt)
         result = response.text.strip() if response.text else "No response from Gemini"
-        # Attempt to parse as JSON
+        
+        # Remove markdown code fences if present (e.g., ```json ... ```)
+        match = re.match(r"^```(?:json)?\s*(.*?)\s*```$", result, re.DOTALL)
+        if match:
+            result = match.group(1).strip()
+        
         try:
             result_json = json.loads(result)
             logger.info("✅ Gemini quantitative analysis parsed as JSON successfully")
             return result_json
         except json.JSONDecodeError as e:
-            logger.error(f"❌ JSON decode error in quantitative analysis: {e}")
+            logger.error(f"❌ JSON decode error in quantitative analysis: {e}. Raw response: {result}", exc_info=True)
             return {"error": "Failed to parse Gemini response as JSON", "raw_response": result}
     except Exception as e:
-        logger.error(f"❌ Gemini API error in analyze_yahoo_data: {e}")
+        logger.error(f"❌ Gemini API error in analyze_yahoo_data: {e}", exc_info=True)
         return {"error": str(e)}
 
 def analyze_pdf_content(ticker: str, pdf_text: str):
@@ -128,13 +134,12 @@ You are an expert financial analyst with deep knowledge of SEC filings. I am pro
 Your output should be a concise, bullet-pointed or short-paragraph summary of the financial analysis based on the provided SEC filing text.
     """
     try:
-        # Append the extracted text to the prompt
         response = model.generate_content(prompt + "\n\n" + pdf_text)
         result = response.text.strip() if response.text else "No response from Gemini"
         logger.info("✅ Gemini qualitative analysis completed successfully")
         return result
     except Exception as e:
-        logger.error(f"❌ Gemini API error in analyze_pdf_content: {e}")
+        logger.error(f"❌ Gemini API error in analyze_pdf_content: {e}", exc_info=True)
         return "⚠️ An error occurred while generating SEC filing analysis."
 
 def synthesize_analysis(ticker: str, yahoo_analysis: dict, sec_analysis: str):
@@ -168,5 +173,5 @@ Return a concise, bullet-pointed summary of the return analysis and recommendati
         logger.info("✅ Gemini synthesis analysis completed successfully")
         return result
     except Exception as e:
-        logger.error(f"❌ Gemini API error in synthesize_analysis: {e}")
+        logger.error(f"❌ Gemini API error in synthesize_analysis: {e}", exc_info=True)
         return "⚠️ An error occurred while synthesizing analyses."
