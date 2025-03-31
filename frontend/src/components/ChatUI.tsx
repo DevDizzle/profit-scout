@@ -131,17 +131,17 @@ export default function ChatUI() {
 
   return (
     <div className="flex flex-col items-center justify-center w-full">
-      <div className="w-full max-w-4xl shadow-xl rounded-xl bg-gray-900 text-white p-6 space-y-4">
-        <div className="h-[70vh] overflow-y-auto border border-gray-700 rounded-lg p-4 bg-gray-800">
+      <div className="w-full max-w-4xl shadow-xl rounded-xl bg-[#252525] text-white p-6 space-y-4">
+        <div className="h-[70vh] overflow-y-auto rounded-lg p-4 bg-[#333333]">
           {messages.map(msg => (
             <div key={msg.id} className={`mb-3 ${msg.type === "user" ? "text-right" : "text-left"}`}>
-              <span className="block text-xs text-gray-400 mb-1">{msg.timestamp}</span>
-              <div className={`inline-block p-3 rounded-lg ${msg.type === "user" ? "bg-blue-600" : "bg-gray-700"}`}>
+              <span className="block text-xs text-[#CCCCCC] mb-1">{msg.timestamp}</span>
+              <div className={`inline-block p-3 rounded-lg ${msg.type === "user" ? "bg-[#00A3E0] text-black" : "bg-[#1A1A1A] text-white"}`}>
                 <pre className="whitespace-pre-wrap text-sm">
                   {msg.expandable && !msg.expanded ? msg.summary : msg.text}
                 </pre>
                 {msg.expandable && (
-                  <button onClick={() => toggleExpand(msg.id)} className="text-xs text-blue-400 mt-1 flex items-center">
+                  <button onClick={() => toggleExpand(msg.id)} className="text-xs text-[#FFD700] mt-1 flex items-center">
                     {msg.expanded ? (<>Collapse <ChevronUp size={16}/></>) : (<>Expand <ChevronDown size={16}/></>)}
                   </button>
                 )}
@@ -149,14 +149,24 @@ export default function ChatUI() {
             </div>
           ))}
         </div>
+
         {isProcessing && (
-          <div className="w-full bg-gray-700 rounded-full h-2">
-            <div className="bg-indigo-500 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+          <div className="w-full bg-[#333333] rounded-full h-2">
+            <div className="bg-[#00A3E0] h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
           </div>
         )}
+
         <div className="flex space-x-2">
-          <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Enter stock ticker (e.g., AMZN)" disabled={isProcessing} />
-          <Button onClick={handleSend} disabled={isProcessing}>{isProcessing ? "Analyzing..." : "Send"}</Button>
+          <Input
+            className="bg-[#1A1A1A] text-white placeholder-[#999]"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Enter stock ticker (e.g., AMZN)"
+            disabled={isProcessing}
+          />
+          <Button onClick={handleSend} disabled={isProcessing}>
+            {isProcessing ? "Analyzing..." : "Send"}
+          </Button>
         </div>
       </div>
     </div>
