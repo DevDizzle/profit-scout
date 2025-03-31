@@ -19,7 +19,8 @@ export default function ChatUI() {
 
   const fetchSynthesis = async (ticker: string) => {
     setIsProcessing(true);
-    // Show initial bot message
+
+    // Step 1: Show initial processing message
     setMessages((prev) => [
       ...prev,
       {
@@ -31,17 +32,37 @@ export default function ChatUI() {
     ]);
 
     try {
-      // Fetch quantitative analysis from the quantitative endpoint
+      // Step 2: Fetch Quantitative Analysis
       const quantitativeRes = await fetch(`${backendUrl}/quantative/analyze_stock/${ticker}`);
-      if (!quantitativeRes.ok) throw new Error(`Quantitative HTTP Error: ${quantitativeRes.status}`);
+      if (!quantitativeRes.ok)
+        throw new Error(`Quantitative HTTP Error: ${quantitativeRes.status}`);
       const quantitativeData = await quantitativeRes.json();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uuidv4(),
+          text: `Quantitative Metrics for ${ticker}:\n${JSON.stringify(quantitativeData.quantitative_analysis, null, 2)}`,
+          type: "bot",
+          timestamp: new Date().toLocaleString(),
+        },
+      ]);
 
-      // Fetch qualitative analysis from the qualitative endpoint
+      // Step 3: Fetch Qualitative Analysis
       const qualitativeRes = await fetch(`${backendUrl}/qualitative/analyze_sec/${ticker}`);
-      if (!qualitativeRes.ok) throw new Error(`Qualitative HTTP Error: ${qualitativeRes.status}`);
+      if (!qualitativeRes.ok)
+        throw new Error(`Qualitative HTTP Error: ${qualitativeRes.status}`);
       const qualitativeData = await qualitativeRes.json();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uuidv4(),
+          text: `Qualitative Analysis for ${ticker}:\n${qualitativeData.qualitative_analysis}`,
+          type: "bot",
+          timestamp: new Date().toLocaleString(),
+        },
+      ]);
 
-      // Combine both analyses and send to the synthesizer endpoint
+      // Step 4: Synthesize the analyses
       const synthesisRes = await fetch(`${backendUrl}/synthesizer/synthesize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -51,20 +72,15 @@ export default function ChatUI() {
           sec_analysis: qualitativeData.qualitative_analysis,
         }),
       });
-      if (!synthesisRes.ok) throw new Error(`Synthesis HTTP Error: ${synthesisRes.status}`);
+      if (!synthesisRes.ok)
+        throw new Error(`Synthesis HTTP Error: ${synthesisRes.status}`);
       const synthesisData = await synthesisRes.json();
-
-      const formattedMessage = `
-📊 **Final Analysis for ${ticker}:**
-
-${synthesisData.synthesis}
-      `;
 
       setMessages((prev) => [
         ...prev,
         {
           id: uuidv4(),
-          text: formattedMessage,
+          text: `📊 Final Analysis for ${ticker}:\n${synthesisData.synthesis}`,
           type: "bot",
           timestamp: new Date().toLocaleString(),
         },
