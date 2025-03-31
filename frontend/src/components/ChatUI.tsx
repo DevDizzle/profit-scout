@@ -16,46 +16,86 @@ export default function ChatUI() {
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-  const fetchAnalysis = async (ticker: string) => {
+  const fetchSynthesis = async (ticker: string) => {
     setIsProcessing(true);
+    // Show initial bot message
     setMessages((prev) => [
       ...prev,
-      { id: Date.now(), text: `ProfitScout is analyzing ${ticker}...`, type: "bot", timestamp: new Date().toLocaleString() },
+      {
+        id: Date.now(),
+        text: `ProfitScout is analyzing ${ticker}...`,
+        type: "bot",
+        timestamp: new Date().toLocaleString(),
+      },
     ]);
 
     try {
-      const response = await fetch(`${backendUrl}/agent1/analyze_stock/${ticker}`);
-      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-      const data = await response.json();
+      // Fetch quantitative analysis from the quantitative endpoint
+      const quantitativeRes = await fetch(`${backendUrl}/quantative/analyze_stock/${ticker}`);
+      if (!quantitativeRes.ok) throw new Error(`Quantitative HTTP Error: ${quantitativeRes.status}`);
+      const quantitativeData = await quantitativeRes.json();
+
+      // Fetch qualitative analysis from the qualitative endpoint
+      const qualitativeRes = await fetch(`${backendUrl}/qualitative/analyze_sec/${ticker}`);
+      if (!qualitativeRes.ok) throw new Error(`Qualitative HTTP Error: ${qualitativeRes.status}`);
+      const qualitativeData = await qualitativeRes.json();
+
+      // Combine both analyses and send to the synthesizer endpoint
+      const synthesisRes = await fetch(`${backendUrl}/synthesizer/synthesize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker,
+          yahoo_analysis: quantitativeData.quantitative_analysis,
+          sec_analysis: qualitativeData.qualitative_analysis,
+        }),
+      });
+      if (!synthesisRes.ok) throw new Error(`Synthesis HTTP Error: ${synthesisRes.status}`);
+      const synthesisData = await synthesisRes.json();
 
       const formattedMessage = `
-📈 **Stock Analysis for ${data.ticker}:**
+📊 **Final Analysis for ${ticker}:**
 
-- **ROE:** ${data.financial_ratios?.ROE ? (data.financial_ratios.ROE * 100).toFixed(2) + "%" : "N/A"}
-- **Current Ratio:** ${data.financial_ratios?.Current_Ratio?.toFixed(2) || "N/A"}
-- **Gross Margin:** ${data.financial_ratios?.Gross_Margin ? (data.financial_ratios.Gross_Margin * 100).toFixed(2) + "%" : "N/A"}
-- **P/E Ratio:** ${data.financial_ratios?.P_E_Ratio?.toFixed(2) || "N/A"}
-- **Debt to Equity:** ${data.financial_ratios?.Debt_to_Equity !== null ? data.financial_ratios.Debt_to_Equity.toFixed(2) : "N/A"}
-- **FCF Yield:** ${data.financial_ratios?.FCF_Yield !== null ? data.financial_ratios.FCF_Yield.toFixed(2) : "N/A"}
-
-📢 **Recommendation: ${data.analysis.match(/\*\*Recommendation:\*\* (.*?)\n/)?.[1] || "No recommendation"}**  
-
-💡 **Summary:**  
-${data.analysis.split("**Recommendation:**")[0].trim()}
+${synthesisData.synthesis}
       `;
 
-      setMessages((prev) => [...prev, { id: Date.now(), text: formattedMessage, type: "bot", timestamp: new Date().toLocaleString() }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now(),
+          text: formattedMessage,
+          type: "bot",
+          timestamp: new Date().toLocaleString(),
+        },
+      ]);
     } catch (error) {
-      setMessages((prev) => [...prev, { id: Date.now(), text: "Error fetching analysis. Try again.", type: "bot", timestamp: new Date().toLocaleString() }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now(),
+          text: "Error fetching synthesis. Try again.",
+          type: "bot",
+          timestamp: new Date().toLocaleString(),
+        },
+      ]);
+      console.error(error);
     }
-
     setIsProcessing(false);
   };
 
   const handleSend = () => {
     if (!query.trim()) return;
-    setMessages((prev) => [...prev, { id: Date.now(), text: query, type: "user", timestamp: new Date().toLocaleString() }]);
-    fetchAnalysis(query);
+    // Add user message
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        text: query,
+        type: "user",
+        timestamp: new Date().toLocaleString(),
+      },
+    ]);
+    fetchSynthesis(query);
     setQuery("");
   };
 
@@ -66,7 +106,9 @@ ${data.analysis.split("**Recommendation:**")[0].trim()}
           {messages.map((msg) => (
             <div key={msg.id} className={`p-2 ${msg.type === "user" ? "text-right" : "text-left"}`}>
               <span className="block text-sm text-gray-500">{msg.timestamp}</span>
-              <div className={`inline-block p-2 rounded-lg ${msg.type === "user" ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-900"}`}>{msg.text}</div>
+              <div className={`inline-block p-2 rounded-lg ${msg.type === "user" ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-900"}`}>
+                {msg.text}
+              </div>
             </div>
           ))}
         </div>
