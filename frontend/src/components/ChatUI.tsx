@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronUp } from "lucide-react"; // Assuming an icon library like lucide-react
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 interface Message {
   id: string;
@@ -27,7 +27,7 @@ const formatQuantitativeMetrics = (ticker: string, data: any) => {
 | **Revenue Growth**    | ${(revenue_growth * 100).toFixed(2)}% |
 | **Latest Revenue**    | $${(latest_revenue / 1e9).toFixed(2)}B |
 | **Free Cash Flow**    | $${(free_cash_flow / 1e9).toFixed(2)}B |
-| **Debt-to-Equity**   | ${debt_to_equity.toFixed(3)} |
+| **Debt-to-Equity**    | ${debt_to_equity.toFixed(3)} |
 | **Market Cap**        | $${(market_cap / 1e12).toFixed(2)}T |
 | **Price Trend**       | ${price_trend_ratio > 1 ? "Positive" : "Negative"} (${price_trend_ratio.toFixed(2)}) |
 [Expand for full metrics]`;
@@ -131,7 +131,7 @@ export default function ChatUI() {
           summary: finalFormatted.summary,
         },
       ]);
-    } catch (error) {
+    } catch (error: any) {
       setMessages((prev) => [
         ...prev,
         {
@@ -171,27 +171,27 @@ export default function ChatUI() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
-      <div className="w-full max-w-2xl shadow-lg rounded-xl bg-white p-4 space-y-4">
-        <div className="h-96 overflow-y-auto border rounded-lg p-3 bg-gray-50">
+    <div className="flex flex-col items-center justify-center w-full">
+      <div className="w-full max-w-3xl shadow-xl rounded-xl bg-gray-900 text-white p-6 space-y-4">
+        <div className="h-96 overflow-y-auto border border-gray-700 rounded-lg p-4 bg-gray-800">
           {messages.map((msg) => (
             <div
               key={msg.id}
               className={`p-2 ${msg.type === "user" ? "text-right" : "text-left"}`}
             >
-              <span className="block text-sm text-gray-500">{msg.timestamp}</span>
+              <span className="block text-xs text-gray-400">{msg.timestamp}</span>
               <div
-                className={`inline-block p-2 rounded-lg ${
-                  msg.type === "user" ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-900"
+                className={`inline-block p-3 rounded-lg ${
+                  msg.type === "user" ? "bg-blue-600" : "bg-gray-700"
                 }`}
               >
-                <pre className="whitespace-pre-wrap">
+                <pre className="whitespace-pre-wrap text-sm">
                   {msg.expandable && !msg.expanded ? msg.summary : msg.text}
                 </pre>
                 {msg.expandable && (
                   <button
                     onClick={() => toggleExpand(msg.id)}
-                    className="text-sm text-blue-500 mt-1 flex items-center"
+                    className="text-xs text-blue-400 mt-1 flex items-center"
                   >
                     {msg.expanded ? (
                       <>
