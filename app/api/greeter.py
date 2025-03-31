@@ -26,11 +26,11 @@ async def validate_stock_api(stock_query: str):
             return Stock(ticker=ticker, company_name="Company Name Placeholder")
     
     logger.warning(f"❌ Stock not found: {stock_query}")
-    # Call Gemini to get suggestions
+    # Call Gemini to get suggestions, instructing it to ground its answer in Google Search results
     suggestions = suggest_stocks(stock_query)
     error_message = (
         f"We only analyze stocks in the S&P500. Based on your query '{stock_query}', "
-        f"here are some suggestions within our scope: {suggestions}"
+        f"here are some suggestions grounded in Google Search results: {suggestions}"
     )
     raise HTTPException(status_code=404, detail=error_message)
 
