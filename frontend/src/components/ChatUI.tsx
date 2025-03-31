@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp } from "lucide-react";
@@ -13,99 +13,60 @@ interface Message {
   summary?: string;
 }
 
+const funFacts = [
+  "Candy Crush brings in more than $633,000 in revenue every day!",
+  "Google was initially called BackRub before it was renamed.",
+  "Pepsi got its name from pepsin, the digestive enzyme.",
+  "Apple's retina scan technology is manufactured by Samsung.",
+  "Pouring a perfect pint of Guinness takes exactly 119.5 seconds.",
+  "Nike was named after the Greek goddess of victory.",
+  "LEGO comes from the Danish word 'Leg Godt', meaning 'play well'.",
+  "Nokia started as a wood mill in Finland before becoming a mobile giant.",
+  "Satya Nadella worked 23 years at Microsoft before becoming its CEO."
+];
+
 function generateUniqueId() {
   return Date.now().toString() + "-" + Math.random().toString(36).substr(2, 9);
 }
-
-// Format quantitative data into a table
-const formatQuantitativeMetrics = (ticker: string, data: any) => {
-  const { revenue_growth, latest_revenue, free_cash_flow, debt_to_equity, market_cap, price_trend_ratio } = data;
-  return `
-### Quantitative Metrics for ${ticker}
-| Metric                | Value              |
-|-----------------------|--------------------|
-| **Revenue Growth**    | ${(revenue_growth * 100).toFixed(2)}% |
-| **Latest Revenue**    | $${(latest_revenue / 1e9).toFixed(2)}B |
-| **Free Cash Flow**    | $${(free_cash_flow / 1e9).toFixed(2)}B |
-| **Debt-to-Equity**    | ${debt_to_equity.toFixed(3)} |
-| **Market Cap**        | $${(market_cap / 1e12).toFixed(2)}T |
-| **Price Trend**       | ${price_trend_ratio > 1 ? "Positive" : "Negative"} (${price_trend_ratio.toFixed(2)}) |
-[Expand for full metrics]`;
-};
-
-// Simplify qualitative analysis
-const formatQualitativeAnalysis = (ticker: string, text: string) => {
-  const lines = text.split("*").filter(Boolean).map(line => line.trim());
-  const summary = lines.slice(0, 3).map(line => `- ${line}`).join("\n");
-  return {
-    summary: `### Qualitative Analysis for ${ticker}\n${summary}\n[Expand for details]`,
-    full: `### Qualitative Analysis for ${ticker}\n${lines.map(line => `- ${line}`).join("\n")}`,
-  };
-};
-
-// Format final analysis
-const formatFinalAnalysis = (ticker: string, text: string) => {
-  const lines = text.split("*").filter(Boolean).map(line => line.trim());
-  const summary = lines.slice(0, 3).map(line => `- ${line}`).join("\n");
-  return {
-    summary: `### 📊 Final Analysis for ${ticker}\n${summary}\n[Expand for full analysis]`,
-    full: `### 📊 Final Analysis for ${ticker}\n${lines.map(line => `- ${line}`).join("\n")}`,
-  };
-};
 
 export default function ChatUI() {
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [funFact, setFunFact] = useState("");
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
   const fetchSynthesis = async (ticker: string) => {
     setIsProcessing(true);
+    setProgress(0);
+    setFunFact(funFacts[Math.floor(Math.random() * funFacts.length)]);
 
-    setMessages((prev) => [
+    setMessages(prev => [
       ...prev,
       {
         id: generateUniqueId(),
-        text: `ProfitScout is analyzing ${ticker}...`,
+        text: `⏳ ProfitScout is analyzing ${ticker}. Please wait (~30 secs). Fun Fact: ${funFact}`,
         type: "bot",
-        timestamp: new Date().toLocaleString(),
-      },
+        timestamp: new Date().toLocaleString()
+      }
     ]);
 
+    const progressInterval = setInterval(() => {
+      setProgress(prev => (prev >= 95 ? 95 : prev + 5));
+    }, 1500);
+
     try {
-      const quantitativeRes = await fetch(`${backendUrl}/quantative/analyze_stock/${ticker}`);
-      if (!quantitativeRes.ok) throw new Error("Quantitative analysis failed");
-      const quantitativeData = await quantitativeRes.json();
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: generateUniqueId(),
-          text: formatQuantitativeMetrics(ticker, quantitativeData.quantitative_analysis),
-          type: "bot",
-          timestamp: new Date().toLocaleString(),
-          expandable: true,
-          expanded: false,
-          summary: formatQuantitativeMetrics(ticker, quantitativeData.quantitative_analysis),
-        },
+      const [quantitativeRes, qualitativeRes] = await Promise.all([
+        fetch(`${backendUrl}/quantative/analyze_stock/${ticker}`),
+        fetch(`${backendUrl}/qualitative/analyze_sec/${ticker}`)
       ]);
 
-      const qualitativeRes = await fetch(`${backendUrl}/qualitative/analyze_sec/${ticker}`);
-      if (!qualitativeRes.ok) throw new Error("Qualitative analysis failed");
+      if (!quantitativeRes.ok || !qualitativeRes.ok) throw new Error("Analysis failed");
+
+      const quantitativeData = await quantitativeRes.json();
       const qualitativeData = await qualitativeRes.json();
-      const qualitativeFormatted = formatQualitativeAnalysis(ticker, qualitativeData.qualitative_analysis);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: generateUniqueId(),
-          text: qualitativeFormatted.full,
-          type: "bot",
-          timestamp: new Date().toLocaleString(),
-          expandable: true,
-          expanded: false,
-          summary: qualitativeFormatted.summary,
-        },
-      ]);
 
       const synthesisRes = await fetch(`${backendUrl}/synthesizer/synthesize`, {
         method: "POST",
@@ -113,111 +74,89 @@ export default function ChatUI() {
         body: JSON.stringify({
           ticker,
           yahoo_analysis: quantitativeData.quantitative_analysis,
-          sec_analysis: qualitativeData.qualitative_analysis,
-        }),
+          sec_analysis: qualitativeData.qualitative_analysis
+        })
       });
+
       if (!synthesisRes.ok) throw new Error("Synthesis failed");
+
       const synthesisData = await synthesisRes.json();
-      const finalFormatted = formatFinalAnalysis(ticker, synthesisData.synthesis);
-      setMessages((prev) => [
+
+      setMessages(prev => [
         ...prev,
         {
           id: generateUniqueId(),
-          text: finalFormatted.full,
+          text: `📊 **Comprehensive Analysis for ${ticker}:**\n\n${synthesisData.synthesis}`,
           type: "bot",
           timestamp: new Date().toLocaleString(),
           expandable: true,
           expanded: false,
-          summary: finalFormatted.summary,
-        },
+          summary: synthesisData.synthesis.slice(0, 250) + "... [Expand for full analysis]"
+        }
       ]);
     } catch (error: any) {
-      setMessages((prev) => [
+      setMessages(prev => [
         ...prev,
         {
           id: generateUniqueId(),
-          text: `Error: ${error.message}. Please try again.`,
+          text: `❌ Error: ${error.message}. Please try again.`,
           type: "bot",
-          timestamp: new Date().toLocaleString(),
-        },
+          timestamp: new Date().toLocaleString()
+        }
       ]);
     }
+
+    clearInterval(progressInterval);
+    setProgress(100);
     setIsProcessing(false);
   };
 
   const handleSend = () => {
     if (!query.trim()) return;
-    setMessages((prev) => [
+    setMessages(prev => [
       ...prev,
-      {
-        id: generateUniqueId(),
-        text: query,
-        type: "user",
-        timestamp: new Date().toLocaleString(),
-      },
+      { id: generateUniqueId(), text: query, type: "user", timestamp: new Date().toLocaleString() }
     ]);
     fetchSynthesis(query);
     setQuery("");
   };
 
   const toggleExpand = (id: string) => {
-    setMessages((prev) =>
-      prev.map((msg) =>
-        msg.id === id && msg.expandable
-          ? { ...msg, expanded: !msg.expanded }
-          : msg
+    setMessages(prev =>
+      prev.map(msg =>
+        msg.id === id && msg.expandable ? { ...msg, expanded: !msg.expanded } : msg
       )
     );
   };
 
   return (
     <div className="flex flex-col items-center justify-center w-full">
-      <div className="w-full max-w-3xl shadow-xl rounded-xl bg-gray-900 text-white p-6 space-y-4">
-        <div className="h-96 overflow-y-auto border border-gray-700 rounded-lg p-4 bg-gray-800">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`p-2 ${msg.type === "user" ? "text-right" : "text-left"}`}
-            >
-              <span className="block text-xs text-gray-400">{msg.timestamp}</span>
-              <div
-                className={`inline-block p-3 rounded-lg ${
-                  msg.type === "user" ? "bg-blue-600" : "bg-gray-700"
-                }`}
-              >
+      <div className="w-full max-w-4xl shadow-xl rounded-xl bg-gray-900 text-white p-6 space-y-4">
+        <div className="h-[70vh] overflow-y-auto border border-gray-700 rounded-lg p-4 bg-gray-800">
+          {messages.map(msg => (
+            <div key={msg.id} className={`mb-3 ${msg.type === "user" ? "text-right" : "text-left"}`}>
+              <span className="block text-xs text-gray-400 mb-1">{msg.timestamp}</span>
+              <div className={`inline-block p-3 rounded-lg ${msg.type === "user" ? "bg-blue-600" : "bg-gray-700"}`}>
                 <pre className="whitespace-pre-wrap text-sm">
                   {msg.expandable && !msg.expanded ? msg.summary : msg.text}
                 </pre>
                 {msg.expandable && (
-                  <button
-                    onClick={() => toggleExpand(msg.id)}
-                    className="text-xs text-blue-400 mt-1 flex items-center"
-                  >
-                    {msg.expanded ? (
-                      <>
-                        Collapse <ChevronUp className="ml-1" size={16} />
-                      </>
-                    ) : (
-                      <>
-                        Expand <ChevronDown className="ml-1" size={16} />
-                      </>
-                    )}
+                  <button onClick={() => toggleExpand(msg.id)} className="text-xs text-blue-400 mt-1 flex items-center">
+                    {msg.expanded ? (<>Collapse <ChevronUp size={16}/></>) : (<>Expand <ChevronDown size={16}/></>)}
                   </button>
                 )}
               </div>
             </div>
           ))}
         </div>
+        {isProcessing && (
+          <div className="w-full bg-gray-700 rounded-full h-2">
+            <div className="bg-indigo-500 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+          </div>
+        )}
         <div className="flex space-x-2">
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Enter stock ticker (e.g., AMZN)"
-            disabled={isProcessing}
-          />
-          <Button onClick={handleSend} disabled={isProcessing}>
-            {isProcessing ? "Analyzing..." : "Send"}
-          </Button>
+          <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Enter stock ticker (e.g., AMZN)" disabled={isProcessing} />
+          <Button onClick={handleSend} disabled={isProcessing}>{isProcessing ? "Analyzing..." : "Send"}</Button>
         </div>
       </div>
     </div>
