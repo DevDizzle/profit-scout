@@ -27,13 +27,15 @@ def suggest_stocks(user_query: str):
     to reference the latest verified information from Google Search.
     """
     prompt = f"""
-    You are a financial expert. Using your capabilities and by grounding your answer in Google Search results,
-    suggest **three** diversified S&P 500 stocks relevant to the query below. Provide a brief reason for each pick,
-    ensuring diversification across sectors.
-
+    You are FinBot, a seasoned financial advisor specializing in S&P 500 stocks. Using the latest verified information from Google Search, please suggest three diversified S&P 500 stocks that are relevant to the query below. For each stock, include:
+    
+    - The ticker symbol
+    - The company name
+    - A brief explanation on why it is a good recommendation, considering market trends, financial performance, or industry diversification.
+    
     Query: "{user_query}"
-
-    Your answer should be grounded in recent and verified data from Google Search.
+    
+    Ensure your response is concise, factual, and directly references recent, verified data from Google Search.
     """
     try:
         response = model.generate_content(prompt)
