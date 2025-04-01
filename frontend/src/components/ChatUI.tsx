@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp } from "lucide-react";
@@ -38,60 +38,42 @@ export default function ChatUI() {
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-  const fetchSynthesis = async (ticker: string) => {
+  // New function to call greeter's /chat endpoint.
+  const fetchGreeterResponse = async (input: string) => {
     setIsProcessing(true);
     setProgress(0);
-    setFunFact(funFacts[Math.floor(Math.random() * funFacts.length)]);
+    const randomFunFact = funFacts[Math.floor(Math.random() * funFacts.length)];
+    setFunFact(randomFunFact);
 
+    // Add a temporary message showing that FinBot is processing.
     setMessages(prev => [
       ...prev,
       {
         id: generateUniqueId(),
-        text: `⏳ ProfitScout is analyzing ${ticker}. Please wait (~30 secs). Fun Fact: ${funFact}`,
+        text: `⏳ FinBot is processing your message... Fun Fact: ${randomFunFact}`,
         type: "bot",
         timestamp: new Date().toLocaleString()
       }
     ]);
 
-    const progressInterval = setInterval(() => {
-      setProgress(prev => (prev >= 95 ? 95 : prev + 5));
-    }, 1500);
-
     try {
-      const [quantitativeRes, qualitativeRes] = await Promise.all([
-        fetch(`${backendUrl}/quantative/analyze_stock/${ticker}`),
-        fetch(`${backendUrl}/qualitative/analyze_sec/${ticker}`)
-      ]);
-
-      if (!quantitativeRes.ok || !qualitativeRes.ok) throw new Error("Analysis failed");
-
-      const quantitativeData = await quantitativeRes.json();
-      const qualitativeData = await qualitativeRes.json();
-
-      const synthesisRes = await fetch(`${backendUrl}/synthesizer/synthesize`, {
+      const response = await fetch(`${backendUrl}/greeter/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticker,
-          yahoo_analysis: quantitativeData.quantitative_analysis,
-          sec_analysis: qualitativeData.qualitative_analysis
-        })
+        body: JSON.stringify({ message: input })
       });
 
-      if (!synthesisRes.ok) throw new Error("Synthesis failed");
+      if (!response.ok) throw new Error("Request failed");
 
-      const synthesisData = await synthesisRes.json();
+      const data = await response.json();
 
       setMessages(prev => [
         ...prev,
         {
           id: generateUniqueId(),
-          text: `📊 **Comprehensive Analysis for ${ticker}:**\n\n${synthesisData.synthesis}`,
+          text: data.message,
           type: "bot",
-          timestamp: new Date().toLocaleString(),
-          expandable: true,
-          expanded: false,
-          summary: synthesisData.synthesis.slice(0, 250) + "... [Expand for full analysis]"
+          timestamp: new Date().toLocaleString()
         }
       ]);
     } catch (error: any) {
@@ -106,18 +88,21 @@ export default function ChatUI() {
       ]);
     }
 
-    clearInterval(progressInterval);
-    setProgress(100);
     setIsProcessing(false);
+    setProgress(100);
   };
 
   const handleSend = () => {
     if (!query.trim()) return;
+
+    // Add the user's message.
     setMessages(prev => [
       ...prev,
       { id: generateUniqueId(), text: query, type: "user", timestamp: new Date().toLocaleString() }
     ]);
-    fetchSynthesis(query);
+
+    // Pass the input to the greeter for a natural response.
+    fetchGreeterResponse(query);
     setQuery("");
   };
 
@@ -161,11 +146,11 @@ export default function ChatUI() {
             className="bg-[#1A1A1A] text-white placeholder-[#999]"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Enter stock ticker (e.g., AMZN)"
+            placeholder="Enter a stock ticker or company name"
             disabled={isProcessing}
           />
           <Button onClick={handleSend} disabled={isProcessing}>
-            {isProcessing ? "Analyzing..." : "Send"}
+            {isProcessing ? "Processing..." : "Send"}
           </Button>
         </div>
       </div>
