@@ -23,8 +23,6 @@ model = genai.GenerativeModel(
 def suggest_stocks(user_query: str):
     """
     Return Gemini's stock suggestions based on a user query.
-    This version is "grounded" in Google Search results. The prompt instructs the model
-    to reference the latest verified information from Google Search.
     """
     prompt = f"""
     You are FinBot, a seasoned financial advisor specializing in S&P 500 stocks. Using the latest verified information from Google Search, please suggest three diversified S&P 500 stocks that are relevant to the query below. For each stock, include:
