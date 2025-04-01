@@ -1,18 +1,12 @@
 import logging
 from fastapi import APIRouter
+from pydantic import BaseModel
 from app.models.stock import Stock
 from app.services.gemini_service import suggest_stocks
 from app.utils.logger import logger
 import pandas as pd
 
 router = APIRouter(prefix="/greeter")
-
-# System prompt defining the greeter's role and purpose.
-SYSTEM_PROMPT = (
-    "You are FinBot, a knowledgeable financial assistant specializing in S&P 500 stock analysis. "
-    "Your purpose is to validate user inputs—whether stock tickers or company names—and guide the user to enter a valid ticker or company. "
-    "You answer basic financial questions in a friendly, conversational tone and ensure that downstream analysis only processes valid S&P 500 stocks."
-)
 
 def get_sp500_companies():
     """
@@ -32,13 +26,6 @@ def get_sp500_companies():
         company_to_ticker[company.lower()] = ticker
     return ticker_to_company, company_to_ticker
 
-@router.get("/system_prompt")
-async def system_prompt():
-    """
-    Returns the system prompt defining the greeter's scope and purpose.
-    """
-    return {"system_prompt": SYSTEM_PROMPT}
-
 @router.get("/validate_stock/{stock_query}")
 async def validate_stock_api(stock_query: str):
     """
@@ -50,14 +37,14 @@ async def validate_stock_api(stock_query: str):
     ticker_to_company, company_to_ticker = get_sp500_companies()
     query_lower = stock_query.lower().strip()
 
-    # Check if the input is a valid ticker
+    # Check if the input is a valid ticker.
     if query_lower in ticker_to_company:
         company_name = ticker_to_company[query_lower]
         message = f"Ticker '{stock_query.upper()}' recognized for {company_name}. Proceeding to analysis."
         logger.info(f"✅ Valid ticker found: {stock_query.upper()} ({company_name})")
         return {"ticker": stock_query.upper(), "company_name": company_name, "message": message}
     
-    # Check if the input is a valid company name
+    # Check if the input is a valid company name.
     elif query_lower in company_to_ticker:
         ticker = company_to_ticker[query_lower]
         company_name = ticker_to_company[ticker.lower()]
@@ -85,13 +72,17 @@ async def stock_suggestions_api(user_query: str):
     suggestions = suggest_stocks(user_query)
     return {"suggestions": suggestions}
 
+class ChatRequest(BaseModel):
+    message: str
+
 @router.post("/chat")
-async def chat(message: str):
+async def chat(chat_request: ChatRequest):
     """
     Handles a simple conversational input.
     If the message matches a valid ticker or company, it validates the stock.
     Otherwise, it responds in a friendly tone encouraging the user to provide a ticker or company name.
     """
+    message = chat_request.message
     logger.info(f"📡 Chat received: {message}")
     ticker_to_company, company_to_ticker = get_sp500_companies()
     message_lower = message.lower().strip()
