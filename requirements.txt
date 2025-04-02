@@ -1,35 +1,38 @@
+# requirements.txt
+
 # Environment & Configuration
 python-dotenv==1.0.0
+pyyaml==6.0.1
 
 # Google Gemini AI API
 google-generativeai==0.8.4
 
-# Google Cloud Dependencies
-google-cloud-storage==2.11.0
-google-cloud-core==2.4.2
+# Google Cloud Dependencies (Optional - If used elsewhere)
+# google-cloud-storage==2.11.0
+# google-cloud-core==2.4.2
 
-# PDF Processing
+# PDF Processing (Optional - If used elsewhere, e.g., qualitative)
 PyPDF2==3.0.1
 
 # Logging & Utilities
 pytz==2024.1
 requests==2.31.0
-beautifulsoup4==4.11.1
+beautifulsoup4==4.11.1 # Potentially used by pandas, good to include
+cachetools==5.3.3  # Added dependency for caching in greeter.py (using a recent stable version)
+tenacity==8.2.3  # For retries (likely used elsewhere)
 
 # Data & Finance
 numpy>=1.21.0
 pandas>=2.0.0
-yfinance>=0.2.0
-tenacity==8.2.3
+yfinance>=0.2.0 # (Optional - If used elsewhere, e.g., quantitative)
+lxml==5.2.1 # Explicitly add lxml parser needed by pandas.read_html (using a recent stable version)
 
-# Testing Dependencies
-pytest==8.1.1
-pytest-asyncio==0.23.5
-httpx==0.27.0
 
 # FastAPI & ASGI Server
 fastapi==0.110.0
-uvicorn==0.27.1
+uvicorn[standard]==0.27.1 # Use [standard] for better performance
 
-# YAML Parsing
-pyyaml==6.0.1
+# Testing Dependencies (Optional - For development environment)
+# pytest==8.1.1
+# pytest-asyncio==0.23.5
+# httpx==0.27.0
