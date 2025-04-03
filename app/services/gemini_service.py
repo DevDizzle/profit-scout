@@ -26,7 +26,7 @@ def suggest_stocks(user_query: str):
     Return Gemini's stock suggestions based on a user query.
     """
     prompt = f"""
-    You are FinBot, a seasoned financial advisor specializing in S&P 500 stocks. Using the latest verified information from Google Search, please suggest three diversified S&P 500 stocks that are relevant to the query below. For each stock, include:
+    You are seasoned financial advisor specializing in S&P 500 stocks. Using the latest verified information from Google Search, please suggest three diversified S&P 500 stocks that are relevant to the query below. For each stock, include:
 
     - The ticker symbol
     - The company name
@@ -158,6 +158,25 @@ def synthesize_analysis(ticker: str, yahoo_analysis: dict, sec_analysis: str):
     prompt = f"""
 You are a highly-regarded senior financial analyst, known for rigorous fundamental analysis similar to the principles employed at Berkshire Hathaway. You have been asked by senior investment partners to synthesize the provided Quantitative Metrics and Qualitative Analysis Summary for stock {ticker} into a single, actionable investment recommendation (Buy, Sell, or Hold) based *only* on the provided information.
 
-**Quantitative Metrics (from Yahoo Finance Data):**
-```json
+**Qualitative Financial Analysis Summary:**
+{sec_analysis}
+
+**Quantitative Financial Metrics (JSON):**
 {quantitative_metrics_str}
+
+**Instructions:**
+1. **Combine Insights**: Integrate the qualitative trends (e.g., revenue growth drivers, profitability improvements) with the quantitative data (e.g., exact revenue figures, ratios) to create a unified analysis.
+2. **Focus on Financial Performance**: Highlight key financial strengths, trends, and any concerns supported by both sources.
+3. **Provide a Recommendation**: Based on the combined analysis, offer a clear Buy, Sell, or Hold recommendation with a brief rationale tied to the financial data.
+
+**Output Format:**
+Return a concise, bullet-pointed summary of the return analysis and recommendation. Do not include extraneous narrative or non-financial details beyond what impacts financial performance directly.
+    """
+    try:
+        response = model.generate_content(prompt)
+        result = response.text.strip() if response.text else "No response from Gemini"
+        logger.info("✅ Gemini synthesis analysis completed successfully")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Gemini API error in synthesize_analysis: {e}", exc_info=True)
+        return "⚠️ An error occurred while synthesizing analyses.
