@@ -21,7 +21,7 @@ interface QuantitativeData {
   price_trend_ratio?: number | string | null;
   ma_50?: number | string | null;
   ma_200?: number | string | null;
-  recommendation?: string | null; // Quant recommendation
+  recommendation?: string | null; // Quant recommendation (kept in interface, removed from display)
   error?: string | null; // Potential error from quant analysis
   raw_response?: string | null;
 }
@@ -34,7 +34,8 @@ interface Message {
   isLoading?: boolean;
   taskId?: string;
   quantitativeData?: QuantitativeData | null;
-  isError?: boolean;
+  isError?: boolean; // For actual processing/connection errors
+  isGuidance?: boolean; // For informational messages like unrecognized input
 }
 
 function generateUniqueId() {
@@ -47,7 +48,8 @@ function QuantTable({ data }: { data: QuantitativeData | null | undefined }) {
     return null;
   }
 
-  const displayMap: Record<keyof QuantitativeData, string> = {
+  // **MODIFICATION:** Removed 'recommendation' from the display map
+  const displayMap: Record<keyof Omit<QuantitativeData, 'recommendation' | 'error' | 'raw_response' | 'operating_cash_flow' | 'capital_expenditure'>, string> = {
     revenue_growth: "Revenue Growth",
     latest_revenue: "Latest Revenue",
     previous_revenue: "Previous Revenue",
@@ -60,29 +62,38 @@ function QuantTable({ data }: { data: QuantitativeData | null | undefined }) {
     price_trend_ratio: "Price Trend (50/200)",
     ma_50: "50-Day MA",
     ma_200: "200-Day MA",
-    recommendation: "Quant Recommendation"
+    // recommendation: "Quant Recommendation" // <-- REMOVED THIS LINE
   };
 
   const formatValue = (value: any) => {
     if (typeof value === 'number') {
-      if (String(value).includes('.') && Math.abs(value) < 5) { // Basic heuristic for ratios/yields
-        return value.toFixed(4);
+      // Heuristic check for potential percentage or ratio values vs large numbers
+      if (String(value).includes('.') && Math.abs(value) < 100 && Math.abs(value) > 0.0001) {
+         // Check if it might be a percentage based on context (you might refine this)
+         // For now, format ratios/yields to more decimal places
+         if (['revenue_growth', 'fcf_yield', 'debt_to_equity', 'price_trend_ratio'].some(key => Object.keys(data).includes(key))) {
+             return value.toFixed(4);
+         }
       }
-      return value.toLocaleString(undefined, { maximumFractionDigits: 2 }); // Format large numbers
+      // Format potentially large numbers with commas
+      return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
     }
-    return String(value ?? 'N/A'); // Handle null/undefined
+    // Handle null/undefined or non-numeric strings
+    return String(value ?? 'N/A');
   };
+
 
   return (
     <div className="mt-3 pt-3 border-t border-gray-600 text-xs">
       <h4 className="font-semibold mb-1 text-[#FFD700]">Quantitative Metrics:</h4>
       <table className="w-full text-left border-collapse">
         <tbody>
-          {Object.entries(displayMap).map(([key, label]) =>
-              data.hasOwnProperty(key) && data[key as keyof QuantitativeData] != null && ( // Check if key exists and value is not null
+          {/* Use stricter typing for keys to ensure we only map defined display values */}
+          {(Object.keys(displayMap) as Array<keyof typeof displayMap>).map((key) =>
+              data.hasOwnProperty(key) && data[key] != null && (
                <tr key={key} className="border-b border-gray-700 last:border-b-0">
-                 <td className="py-1 pr-2 font-medium text-[#CCCCCC]">{label}</td>
-                 <td className="py-1 pl-2 text-white">{formatValue(data[key as keyof QuantitativeData])}</td>
+                 <td className="py-1 pr-2 font-medium text-[#CCCCCC]">{displayMap[key]}</td>
+                 <td className="py-1 pl-2 text-white">{formatValue(data[key])}</td>
                </tr>
              )
           )}
@@ -149,13 +160,26 @@ export default function ChatUI() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ detail: "Request failed with status " + response.status }));
-        throw new Error(errorData.detail || "Request failed");
+        // This is a real error
+        setMessages(prev => [
+            ...prev,
+            {
+                id: generateUniqueId(),
+                text: `❌ Error: ${errorData.detail || "Request failed"}. Please check connection or backend.`,
+                type: "bot",
+                timestamp: new Date().toLocaleString(),
+                isError: true, // Set true error flag
+            }
+        ]);
+        setIsProcessing(false);
+        return; // Stop further processing on fetch error
       }
 
       const data = await response.json();
 
       // Add the actual initial response from the backend
       const initialBotMessageId = generateUniqueId();
+      const isGuidanceMessage = data.status === "unrecognized" || data.status === "needs_clarification";
       setMessages(prev => [
         ...prev,
         {
@@ -163,7 +187,9 @@ export default function ChatUI() {
           text: data.message,
           type: "bot",
           timestamp: new Date().toLocaleString(),
-          isError: data.status === "unrecognized" || data.status === "needs_clarification",
+          // **MODIFICATION:** Set isGuidance instead of isError for these statuses
+          isGuidance: isGuidanceMessage,
+          isError: false, // Ensure isError is false for guidance messages
         }
       ]);
 
@@ -193,47 +219,59 @@ export default function ChatUI() {
 
         newEventSource.onmessage = (event) => {
           console.log("SSE Message Received:", event.data);
-          let result; // Declare outside try block
+          let result;
           try {
-             result = JSON.parse(event.data); // Parse here
+             result = JSON.parse(event.data);
 
             setMessages(prev => prev.map(msg => {
               if (msg.id === finalResultMessageId) {
+                // Handle final 'completed' status from SSE
                 if (result.status === 'completed' && result.data) {
                   return {
                     ...msg,
                     text: result.data.synthesis || "Synthesis complete.",
                     quantitativeData: result.data.quantitativeData || null,
                     isLoading: false,
-                    isError: false,
+                    isError: false, // Successful completion is not an error
+                    isGuidance: false,
                   };
-                } else { // Handle 'error' status from backend or other non-complete but final statuses
+                // Handle final 'error' status from SSE (or other failed statuses)
+                } else if (result.status === 'error' /* Add other potential final non-complete statuses here */) {
                   return {
                     ...msg,
-                    text: `❌ Analysis ${result.status || 'failed'}: ${result.data?.message || 'Unknown error or timeout'}`,
+                    text: `❌ Analysis failed: ${result.data?.message || 'Unknown error during analysis'}`,
                     isLoading: false,
-                    isError: true,
+                    isError: true, // This is a real error from the backend task
+                    isGuidance: false,
                   };
                 }
+                // Optional: Handle intermediate statuses if your backend sends them
+                // else { return {...msg, text: result.data?.message || msg.text, isLoading: true }; }
+
+                // Fallback for unexpected final statuses (treat as error)
+                 return {
+                    ...msg,
+                    text: `❌ Analysis ended with unexpected status '${result.status}': ${result.data?.message || 'No details'}`,
+                    isLoading: false,
+                    isError: true,
+                    isGuidance: false,
+                  };
               }
               return msg;
             }));
 
           } catch (e) {
             console.error("Failed to parse SSE message data:", e, "Raw data:", event.data);
-            setMessages(prev => prev.map(msg => msg.id === finalResultMessageId ? { ...msg, text: "❌ Error processing analysis result from server.", isLoading: false, isError: true } : msg));
+            // Treat parsing failure as a real error
+            setMessages(prev => prev.map(msg => msg.id === finalResultMessageId ? { ...msg, text: "❌ Error processing analysis result from server.", isLoading: false, isError: true, isGuidance: false } : msg));
+            result = { status: 'parse_error' }; // Ensure finally block knows to close
           } finally {
-             // Close SSE only if the received message indicates completion or error
-             if (result && (result.status === 'completed' || result.status === 'error' /* Add any other final statuses */)) {
+             // Close SSE only if the received message indicates a *final* state (completed, error, parse_error, etc.)
+             if (result && (result.status === 'completed' || result.status === 'error' || result.status === 'parse_error' /* Add any other final statuses */)) {
                 console.log(`SSE Connection Closed gracefully after status: ${result.status}.`);
                 newEventSource.close();
                 eventSourceRef.current = null;
                 setIsProcessing(false); // Indicate overall processing finished
-             } else if (!result) { // Handle the catch block case where result is undefined
-                 console.log("SSE Connection Closed due to parsing error.");
-                 newEventSource.close();
-                 eventSourceRef.current = null;
-                 setIsProcessing(false);
              }
              // Otherwise, keep listening for more messages if it's an intermediate status
           }
@@ -241,9 +279,10 @@ export default function ChatUI() {
 
         newEventSource.onerror = (error) => {
           console.error("SSE Error:", error);
-          setMessages(prev => prev.map(msg => msg.id === finalResultMessageId ? { ...msg, text: "❌ Connection error during analysis.", isLoading: false, isError: true } : msg));
+           // Treat SSE connection error as a real error
+          setMessages(prev => prev.map(msg => msg.id === finalResultMessageId ? { ...msg, text: "❌ Connection error during analysis.", isLoading: false, isError: true, isGuidance: false } : msg));
           setIsProcessing(false);
-          if (eventSourceRef.current) { // Check if it exists before closing
+          if (eventSourceRef.current) {
              eventSourceRef.current.close();
              eventSourceRef.current = null;
              console.log("SSE Connection Closed due to error.");
@@ -251,15 +290,16 @@ export default function ChatUI() {
         };
 
       } else {
-        // If status wasn't "processing_started", no background task, so processing is done
+        // If initial response status wasn't "processing_started", no background task, so processing is done for now
         setIsProcessing(false);
       }
 
     } catch (error: any) {
+        // This catch block handles errors during the *initial* fetch POST request itself
       console.error("Fetch Greeter Response Error:", error);
       // Ensure thinking message is removed if it wasn't already
       setMessages(prev => prev.filter(msg => msg.id !== thinkingMessageId));
-      // Add error message
+      // Add a real error message
       setMessages(prev => [
         ...prev,
         {
@@ -267,7 +307,8 @@ export default function ChatUI() {
           text: `❌ Error: ${error.message}. Please check connection or backend.`,
           type: "bot",
           timestamp: new Date().toLocaleString(),
-          isError: true,
+          isError: true, // This is a real error
+          isGuidance: false,
         }
       ]);
       setIsProcessing(false); // Ensure processing stops on error
@@ -293,19 +334,20 @@ export default function ChatUI() {
 
   return (
     <div className="flex flex-col items-center justify-center w-full">
-      <div className="w-full max-w-4xl shadow-xl rounded-xl bg-[#252525] text-white p-6 flex flex-col"> {/* Changed to flex-col */}
+      <div className="w-full max-w-4xl shadow-xl rounded-xl bg-[#252525] text-white p-6 flex flex-col">
         {/* Message Display Area */}
-        <div className="flex-grow h-[70vh] overflow-y-auto rounded-lg p-4 bg-[#333333] space-y-4 mb-4"> {/* Added flex-grow and mb-4 */}
+        <div className="flex-grow h-[70vh] overflow-y-auto rounded-lg p-4 bg-[#333333] space-y-4 mb-4">
           {messages.map(msg => (
-            // Wrap each message rendering block with the Error Boundary
             <SimpleErrorBoundary key={msg.id}>
               <div className={`flex ${msg.type === "user" ? "justify-end" : "justify-start"}`}>
                  <div className={`max-w-[80%] ${msg.type === "user" ? "text-right" : "text-left"}`}>
                    <span className={`block text-xs mb-1 ${msg.type === 'user' ? 'text-[#AAAAAA]' : 'text-[#CCCCCC]'}`}>{msg.timestamp}</span>
+                   {/* **MODIFICATION:** Updated className logic for different message types */}
                    <div className={`inline-block p-3 rounded-lg ${
-                       msg.isError ? "bg-red-800 text-red-100" :
-                       msg.type === "user" ? "bg-[#00A3E0] text-black" :
-                       "bg-[#1A1A1A] text-white"
+                       msg.isError ? "bg-red-800 text-red-100" :              // Real errors = Red
+                       msg.isGuidance ? "bg-yellow-700 text-yellow-100" :     // Guidance/Info = Yellow
+                       msg.type === "user" ? "bg-[#00A3E0] text-black" :      // User message = Blue
+                       "bg-[#1A1A1A] text-white"                             // Standard bot message = Dark grey
                      }`}>
                      {msg.isLoading ? (
                        <div className="flex items-center space-x-2 text-sm">
@@ -318,12 +360,8 @@ export default function ChatUI() {
                        <>
                          {/* Render Markdown for bot text, pre for user */}
                          {msg.type === 'bot' ? (
-                            // Apply className to a wrapper div, not ReactMarkdown itself
                             <div className="prose prose-sm prose-invert max-w-none">
-                                <ReactMarkdown
-                                    // No className prop here!
-                                    remarkPlugins={[remarkGfm]}
-                                >
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {msg.text}
                                 </ReactMarkdown>
                             </div>
@@ -331,7 +369,7 @@ export default function ChatUI() {
                            <pre className="whitespace-pre-wrap text-sm font-sans">{msg.text}</pre>
                          )}
 
-                         {/* Render Quant Table if data exists */}
+                         {/* Render Quant Table if data exists (Unchanged) */}
                          {msg.quantitativeData && <QuantTable data={msg.quantitativeData} />}
                        </>
                      )}
@@ -354,7 +392,7 @@ export default function ChatUI() {
             disabled={isProcessing}
             onKeyDown={(e) => { if (e.key === 'Enter' && !isProcessing) handleSend(); }}
           />
-          <Button onClick={handleSend} disabled={isProcessing || !query.trim()} > {/* Disable button if query is empty */}
+          <Button onClick={handleSend} disabled={isProcessing || !query.trim()} >
             {isProcessing ? (
                 <>
                   <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
