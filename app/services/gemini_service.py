@@ -17,8 +17,8 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Initialize the Gemini model (using a potentially more capable model if needed for synthesis)
 # Consider if gemini-1.5-flash is sufficient or if gemini-pro is better
 model = genai.GenerativeModel(
-    "gemini-2.0-flash", # Or "gemini-pro"
-    generation_config={"temperature": 0.1, "max_output_tokens": 4096} # Keep tokens high for synthesis
+    "gemini-2.0-flash",  # Or "gemini-pro"
+    generation_config={"temperature": 0.1, "max_output_tokens": 4096}  # Keep tokens high for synthesis
 )
 
 def suggest_stocks(user_query: str):
@@ -122,8 +122,8 @@ Use null or "N/A" for values if calculation is not possible due to missing data.
             logger.info(f"✅ Gemini quantitative analysis parsed as JSON successfully for {ticker}")
             return result_json
         except json.JSONDecodeError as e:
-            logger.error(f"❌ JSON decode error in quantitative analysis for {ticker}: {e}. Raw response snippet: {result[:500]}", exc_info=False) # Log snippet, disable full traceback for cleaner logs
-            return {"error": "Failed to parse Gemini response as JSON", "raw_response": result} # Return raw response on parse failure
+            logger.error(f"❌ JSON decode error in quantitative analysis for {ticker}: {e}. Raw response snippet: {result[:500]}", exc_info=False)
+            return {"error": "Failed to parse Gemini response as JSON", "raw_response": result}
 
     except Exception as e:
         logger.error(f"❌ Gemini API error in analyze_yahoo_data for {ticker}: {e}", exc_info=True)
@@ -179,4 +179,4 @@ Return a concise, bullet-pointed summary of the return analysis and recommendati
         return result
     except Exception as e:
         logger.error(f"❌ Gemini API error in synthesize_analysis: {e}", exc_info=True)
-        return "⚠️ An error occurred while synthesizing analyses.
+        return "⚠️ An error occurred while synthesizing analyses."
