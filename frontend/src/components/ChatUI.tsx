@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import SimpleErrorBoundary from './SimpleErrorBoundary'; // <-- Import the Error Boundary
+import SimpleErrorBoundary from './SimpleErrorBoundary'; // Assuming this is in the same directory or configured path
 
 // Define interface for quantitative data (adjust keys as needed)
 interface QuantitativeData {
@@ -65,12 +65,12 @@ function QuantTable({ data }: { data: QuantitativeData | null | undefined }) {
 
   const formatValue = (value: any) => {
     if (typeof value === 'number') {
-      if (String(value).includes('.') && Math.abs(value) < 5) {
+      if (String(value).includes('.') && Math.abs(value) < 5) { // Basic heuristic for ratios/yields
         return value.toFixed(4);
       }
-      return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      return value.toLocaleString(undefined, { maximumFractionDigits: 2 }); // Format large numbers
     }
-    return String(value ?? 'N/A');
+    return String(value ?? 'N/A'); // Handle null/undefined
   };
 
   return (
@@ -79,7 +79,7 @@ function QuantTable({ data }: { data: QuantitativeData | null | undefined }) {
       <table className="w-full text-left border-collapse">
         <tbody>
           {Object.entries(displayMap).map(([key, label]) =>
-              data.hasOwnProperty(key) && data[key as keyof QuantitativeData] != null && (
+              data.hasOwnProperty(key) && data[key as keyof QuantitativeData] != null && ( // Check if key exists and value is not null
                <tr key={key} className="border-b border-gray-700 last:border-b-0">
                  <td className="py-1 pr-2 font-medium text-[#CCCCCC]">{label}</td>
                  <td className="py-1 pl-2 text-white">{formatValue(data[key as keyof QuantitativeData])}</td>
@@ -110,6 +110,7 @@ export default function ChatUI() {
 
   // Cleanup effect for EventSource
   useEffect(() => {
+    // Return cleanup function
     return () => {
       if (eventSourceRef.current) {
         console.log("Closing existing EventSource connection on unmount.");
@@ -117,7 +118,7 @@ export default function ChatUI() {
         eventSourceRef.current = null;
       }
     };
-  }, []);
+  }, []); // Empty dependency array ensures this runs only on mount and unmount
 
 
   // Function to handle the initial chat request and start SSE listening
@@ -317,14 +318,17 @@ export default function ChatUI() {
                        <>
                          {/* Render Markdown for bot text, pre for user */}
                          {msg.type === 'bot' ? (
-                           <ReactMarkdown
-                             className="prose prose-sm prose-invert max-w-none" // Tailwind Typography classes applied here
-                             remarkPlugins={[remarkGfm]} // Markdown parsing plugins
-                           >
-                             {msg.text}
-                           </ReactMarkdown>
+                            // Apply className to a wrapper div, not ReactMarkdown itself
+                            <div className="prose prose-sm prose-invert max-w-none">
+                                <ReactMarkdown
+                                    // No className prop here!
+                                    remarkPlugins={[remarkGfm]}
+                                >
+                                    {msg.text}
+                                </ReactMarkdown>
+                            </div>
                          ) : (
-                           <pre className="whitespace-pre-wrap text-sm font-sans">{msg.text}</pre> // Added font-sans for consistency
+                           <pre className="whitespace-pre-wrap text-sm font-sans">{msg.text}</pre>
                          )}
 
                          {/* Render Quant Table if data exists */}
