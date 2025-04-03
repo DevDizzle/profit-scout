@@ -21,30 +21,62 @@ model = genai.GenerativeModel(
     generation_config={"temperature": 0.1, "max_output_tokens": 4096}  # Keep tokens high for synthesis
 )
 
-def suggest_stocks(user_query: str):
+def suggest_stocks(user_query: str, model): # Pass the initialized model object
     """
-    Return Gemini's stock suggestions based on a user query.
+    Generate stock suggestions based on a user query using the Gemini model,
+    with a prompt focused on an analytical tone and avoiding disclaimers.
     """
+    # --- Improved Prompt ---
     prompt = f"""
-    You are seasoned financial advisor specializing in S&P 500 stocks. Using the latest verified information from Google Search, please suggest three diversified S&P 500 stocks that are relevant to the query below. For each stock, include:
+Act as a financial analyst specializing in S&P 500 equity research.
+Your task is to identify three distinct S&P 500 stocks relevant to the user's query, based on recent, publicly available market data and company performance indicators.
 
-    - The ticker symbol
-    - The company name
-    - A brief explanation on why it is a good recommendation, considering market trends, financial performance, or industry diversification.
+For each suggested stock, provide the following information strictly in this format:
+1.  **Ticker Symbol:** [Symbol]
+2.  **Company Name:** [Name]
+3.  **Rationale:** [A concise (2-3 sentences) analytical explanation focusing on key factors like market position, recent performance highlights, relevant sector trends, or strategic advantages.]
 
-    Query: "{user_query}"
+User Query: "{user_query}"
 
-    Ensure your response is concise, factual, and directly references recent, verified data from Google Search.
-    """
-    try:
+**Instructions & Constraints:**
+- Respond in a professional, direct, and analytical tone.
+- Focus solely on presenting the requested stock information and rationale.
+- Do **not** include conversational filler, introductions, or closings (e.g., avoid starting with "Okay, I understand..." or similar phrases).
+- Do **not** include any disclaimers stating you are an AI or cannot provide financial advice. The output is for informational purposes only within a research context.
+- Ensure the rationale is brief and data-driven where possible, reflecting recent information (mentioning Q number or year if relevant and available, e.g., "positive Q1 2025 earnings" or "strong performance in 2024").
+"""
+    # --- End of Improved Prompt ---
+
+    try:https://github.com/DevDizzle/profit-scout/tree/main/app
+        # Ensure the model object is valid before calling
+        if not model:
+             logger.error("❌ Gemini model instance is not provided or invalid in suggest_stocks.")
+             # Return an error message suitable for internal logging or potentially user feedback
+             return "⚠️ Configuration error: AI model not available for stock suggestions."
+
+        # Using the passed model object to generate content
         response = model.generate_content(prompt)
-        # Add basic response validation/checking if needed
-        result = response.text.strip() if hasattr(response, 'text') and response.text else "No response from Gemini"
-        logger.info("✅ Gemini stock suggestions received successfully")
+
+        # Safer way to extract text, handling potential variations in response structure
+        result = ""
+        if response and response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+             result = response.candidates[0].content.parts[0].text.strip()
+        elif hasattr(response, 'text') and response.text: # Fallback for simpler text attribute
+             result = response.text.strip()
+
+        # Check if the result is empty after stripping
+        if not result:
+             logger.warning("⚠️ Gemini returned an empty response for stock suggestions.")
+             result = "⚠️ No specific stock suggestions could be generated based on the query."
+        else:
+            logger.info("✅ Gemini stock suggestions generated successfully")
+
         return result
+
     except Exception as e:
         logger.error(f"❌ Gemini API error in suggest_stocks: {e}", exc_info=True)
-        return "⚠️ An error occurred while generating stock suggestions."
+        # More user-friendly error message for the frontend
+        return "⚠️ An error occurred while communicating with the AI to generate sto
 
 def analyze_yahoo_data(ticker: str, csv_content: str):
     """
