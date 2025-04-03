@@ -68,8 +68,8 @@ def analyze_yahoo_data(ticker: str, csv_content: str):
 
     # Check if essential sections were parsed (optional but good practice)
     if not sections.get('financials') or not sections.get('balance_sheet'):
-         logger.warning(f"⚠️ Missing essential sections ('financials', 'balance_sheet') in parsed CSV data for {ticker}")
-         # Depending on strictness, you could return an error here
+        logger.warning(f"⚠️ Missing essential sections ('financials', 'balance_sheet') in parsed CSV data for {ticker}")
+        # Depending on strictness, you could return an error here
 
     prompt = f"""
 Here is the financial data divided into sections for stock {ticker}:
@@ -109,8 +109,8 @@ Use null or "N/A" for values if calculation is not possible due to missing data.
         # More robust check for response text
         raw_result = response.text.strip() if hasattr(response, 'text') and response.text else None
         if not raw_result:
-             logger.error(f"❌ Gemini returned empty response for quantitative analysis of {ticker}")
-             return {"error": "Gemini returned empty response"}
+            logger.error(f"❌ Gemini returned empty response for quantitative analysis of {ticker}")
+            return {"error": "Gemini returned empty response"}
 
         # Remove markdown code fences if present (e.g., ```json ... ```)
         match = re.match(r"^```(?:json)?\s*(.*?)\s*```$", raw_result, re.DOTALL | re.IGNORECASE)
@@ -144,8 +144,8 @@ def synthesize_analysis(ticker: str, yahoo_analysis: dict, sec_analysis: str):
         yahoo_analysis = {"error": "Invalid quantitative data received"}
 
     if not isinstance(sec_analysis, str) or not sec_analysis.strip():
-         logger.warning(f"Synthesize called for {ticker} with empty or invalid sec_analysis.")
-         sec_analysis = "Qualitative analysis was not available or provided."
+        logger.warning(f"Synthesize called for {ticker} with empty or invalid sec_analysis.")
+        sec_analysis = "Qualitative analysis was not available or provided."
 
     # Safely convert quantitative dict to JSON string for the prompt
     try:
